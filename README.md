@@ -27,7 +27,7 @@
    - **模拟浏览器 TLS 指纹（`client-fingerprint: chrome`）**：消除代理客户端裸握手特征；
    - **DNS 强制走代理 + 封堵 `GEOIP,CN` 泄露**：所有 Claude 及关联遥测域名通过 `#🦀 Claude` 绑定海外加密 DoH（`1.1.1.1` / `8.8.8.8`），开启 `respect-rules: true`，并为末尾 `GEOIP,CN` 自动补齐 `,no-resolve`。
 4. **内置 `ip.net.coffee/claude` 自动化体检脚本（[`check-env.sh`](skills/claude-clash/scripts/check-env.sh)）**
-   - 一键在终端检测：Claude 进程安全状态、三出口 IP 分流对比、**Claude 出口 Trust Score 信任评分（0~100）**、**是否家庭住宅 IP (ISP)**、5 项黑名单记录、动态子域名权威 DNS 泄露实测、STUN UDP 状态及系统大陆时区（`Asia/Shanghai`）告警。
+   - 一键在终端检测：Claude 进程安全状态、三出口 IP 分流对比、**Claude 出口 Trust Score 信任评分（0~100）**、**是否家庭住宅 IP (ISP)**、5 项黑名单记录、动态子域名权威 DNS 泄露实测及 STUN UDP 状态。
 
 ---
 
@@ -77,12 +77,7 @@ bash skills/claude-clash/scripts/check-env.sh
 - **三出口 IP 分流**：中国出口 IPv4（国内直连） / Cloudflare 出口 IP（普通代理） / Claude AI 出口 IP（`🦀 Claude` 专线节点）分流清晰；
 - **Claude AI 信任评分 (Trust Score)**：优先使用 **95~100 分（极度纯净）** 的 **家庭住宅 IP (`ISP`)**；
 - **DNS 泄露检测**：状态为绿色 **「未检测到泄露」**；
-- **WebRTC UDP 泄露检测**：状态为绿色 **「WebRTC 已禁用或无泄露」**（或 UDP 出口与 Claude 出口完全一致）；
-- **时区检测**：若提示「不推荐使用中国大陆时区 (`Asia/Shanghai`)」，可将系统时区改为同样是东八区（UTC+8，电脑显示时间分秒不变）的 **台北 (`Asia/Taipei`)** 或 **新加坡 (`Asia/Singapore`)**：
-  ```bash
-  # macOS 一键切换为台北时区（UTC+8，时间不变）
-  sudo systemsetup -settimezone Asia/Taipei
-  ```
+- **WebRTC UDP 泄露检测**：状态为绿色 **「WebRTC 已禁用或无泄露」**（或 UDP 出口与 Claude 出口完全一致）。
 
 ---
 
@@ -109,6 +104,5 @@ claude-clash/
 - [Claude AI IP 风险检测专页 (`ip.net.coffee/claude`)](https://ip.net.coffee/claude/)
 - [Claude Code 域名分流规则大全 (`ip.net.coffee/claude/site.html`)](https://ip.net.coffee/claude/site.html)
 - [Claude Code 稳定使用指南：11 项关键配置 (`ip.net.coffee/claude/claudecode.html`)](https://ip.net.coffee/claude/claudecode.html)
-- [Claude 监控时区/设备信息自查教程 (`ip.net.coffee/claude/timezone.html`)](https://ip.net.coffee/claude/timezone.html)
 - [为什么不建议用 IPv6 访问 Claude Code (`ip.net.coffee/claude/ipv6.html`)](https://ip.net.coffee/claude/ipv6.html)
 - [nevertoday/xiaoxiaodong-vps](https://github.com/nevertoday/xiaoxiaodong-vps)

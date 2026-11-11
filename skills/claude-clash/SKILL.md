@@ -5,7 +5,7 @@ description: 为本机 Clash Verge Rev（Mihomo 内核）自动配置并验收 C
 
 # Claude-Clash 自动配置与 `ip.net.coffee` 闭环验收指南
 
-你的任务是帮助用户检查并完善本机 **Clash Verge Rev（Mihomo 内核）** 的配置，使 **Claude / Claude Code 分流规则、DNS 防泄露、WebRTC UDP 防护、IPv6 封堵及系统时区** 达到最佳防风控状态，同时**完整保留用户已有的自定义直连/代理规则**，并通过 `ip.net.coffee/claude/` 完成全套指标验收。
+你的任务是帮助用户检查并完善本机 **Clash Verge Rev（Mihomo 内核）** 的配置，使 **Claude / Claude Code 分流规则、DNS 防泄露、WebRTC UDP 防护及 IPv6 封堵** 达到最佳防风控状态，同时**完整保留用户已有的自定义直连/代理规则**，并通过 `ip.net.coffee/claude/` 完成全套指标验收。
 
 - **技术参考标准**：
   - Claude AI IP 风险检测专页：<https://ip.net.coffee/claude/>
@@ -53,7 +53,7 @@ bash "<本SKILL所在目录>/scripts/check-env.sh"
 该脚本会自动完成：
 0. 检查本机是否有正在运行的 `Claude` 客户端或 `claude` CLI 进程（输出 `CLAUDE_RUNNING`）；
 1. 检查 Clash Verge Rev 配置目录、`verge.yaml`（`enable_tun_mode` / `enable_dns_settings`）、`clash-verge.yaml`，并提取当前订阅中所有可用非禁区节点名称（自动按「推荐-家宽/原生节点」与「其他可用节点」分类）；
-2. 检查本机系统时区是否为 `Asia/Shanghai`（中国大陆时区警告）及公网 IPv6 状态；
+2. 检查本机公网 IPv6 状态；
 3. 自动调用 `ip.net.coffee/claude/` 同款接口检测当前的三出口 IP、Claude 出口 **Trust Score 信任评分（0~100）**、**是否家庭住宅 IP (ISP)**、**DNS 泄露结果** 以及 **WebRTC STUN UDP 出口是否与 TCP 出口一致**。
 
 ---
@@ -103,17 +103,13 @@ bash "<本SKILL所在目录>/scripts/check-env.sh"
 
 ---
 
-## 第四步：客户端设置检查与系统时区优化
+## 第四步：客户端设置检查与触发配置生效
 
 1. **确认 Claude 已关闭后触发配置生效**：
    - 再次确认 Claude 客户端、CLI 与网页已关闭；
    - 请用户在 Clash Verge Rev 的「全局扩展脚本」点击 **「保存」**（或在「订阅」页右键当前订阅点击 **「使用」**）。
 2. **检查 TUN 模式与 DNS 覆写**：
    - `verge.yaml` 中 `enable_tun_mode` 必须为 `true`（开启「虚拟网卡模式」），`enable_dns_settings` 必须为 `false`（关闭「DNS 覆写」以免覆盖脚本的 `nameserver-policy`）。
-3. **系统时区优化建议（解决 `ip.net.coffee/claude/` 的大陆时区黄标警告与 Claude Code 隐写标记）**：
-   - 若 `check-env.sh` 检测到系统时区为 `Asia/Shanghai`：
-   - 告知用户：Claude Code (2.1.91+) 及网页端会读取系统 IANA 时区名称；可将系统时区改为同样是 **UTC+8（东八区，电脑显示时间分秒不差）** 的 **`Asia/Taipei`（台北）** 或 **`Asia/Singapore`（新加坡）**：
-     - macOS 一键修改命令：`sudo systemsetup -settimezone Asia/Taipei`（或在「系统设置 → 通用 → 日期与时间」中将最近城市改为台北/新加坡）。
 
 ---
 
@@ -128,5 +124,4 @@ bash "<本SKILL所在目录>/scripts/check-env.sh"
    - **三出口 IP**：中国出口 IPv4（国内直连） / Cloudflare 出口 IP（常规代理） / Claude AI 出口 IP（`🦀 Claude` 专线节点）分流清晰；
    - **Claude AI 信任评分 (Trust Score)**：优先选择 **95~100 分（极度纯净）** 的家庭住宅 IP (`ISP`)；
    - **DNS 泄露检测**：显示绿色 **「未检测到泄露」**；
-   - **WebRTC UDP 泄露检测**：显示绿色 **「WebRTC 已禁用或无泄露」**（或 UDP 出口与 Claude 出口完全一致）；
-   - **用户设备信息**：时区无大陆时区黄标警告。
+   - **WebRTC UDP 泄露检测**：显示绿色 **「WebRTC 已禁用或无泄露」**（或 UDP 出口与 Claude 出口完全一致）。

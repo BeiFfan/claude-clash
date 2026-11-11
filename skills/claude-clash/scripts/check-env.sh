@@ -81,22 +81,7 @@ else
 fi
 
 echo ""
-echo "=== 2. 本机系统时区与 IPv6 环境检查 ==="
-if [[ -L /etc/localtime ]]; then
-  LOCAL_TZ=$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')
-elif command -v timedatectl >/dev/null 2>&1; then
-  LOCAL_TZ=$(timedatectl show -p Timezone --value 2>/dev/null || echo "UNKNOWN")
-else
-  LOCAL_TZ="UNKNOWN"
-fi
-echo "SYSTEM_TIMEZONE=$LOCAL_TZ"
-if [[ "$LOCAL_TZ" =~ ^(Asia/Shanghai|Asia/Chongqing|Asia/Harbin|Asia/Urumqi|Asia/Beijing)$ ]]; then
-  echo "⚠️ TIMEZONE_WARNING: 当前系统时区为 $LOCAL_TZ（中国大陆时区）。"
-  echo "   Claude Code (2.1.91+) 及 ip.net.coffee/claude 会检测大陆时区标识。"
-  echo "   建议切换为同属 UTC+8 东八区的 Asia/Taipei 或 Asia/Singapore（电脑显示时间分秒不变）："
-  echo "   macOS 命令: sudo systemsetup -settimezone Asia/Taipei"
-fi
-
+echo "=== 2. 本机公网 IPv6 环境检查 ==="
 if command -v ifconfig >/dev/null 2>&1; then
   IPV6_OUT=$(ifconfig | awk '/^[a-z]/{i=$1} $1=="inet6" && i!~/^(utun|lo|bridge|awdl|llw|gif|stf|anpi|ap|docker|veth)/ && $2!~/^(fe80|fd|fc|::1|2001:0:|2002:)/ {print i, $2}')
 elif command -v ip >/dev/null 2>&1; then
@@ -106,7 +91,7 @@ else
 fi
 
 if [[ -n "$IPV6_OUT" ]]; then
-  echo "PUBLIC_IPV6=YES ($IPV6_OUT)"
+  echo "PUBLIC_IPV6=YES (${IPV6_OUT})"
 else
   echo "PUBLIC_IPV6=NO"
 fi

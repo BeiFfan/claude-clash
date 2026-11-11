@@ -4,7 +4,6 @@
 - **Claude AI IP 风险检测专页**：<https://ip.net.coffee/claude/>
 - **Claude Code 域名分流规则大全**：<https://ip.net.coffee/claude/site.html>
 - **Claude Code 稳定使用指南（11 项关键配置）**：<https://ip.net.coffee/claude/claudecode.html>
-- **Claude 时区/设备信息检测自查**：<https://ip.net.coffee/claude/timezone.html>
 - **为什么不建议用 IPv6 访问 Claude Code**：<https://ip.net.coffee/claude/ipv6.html>
 
 ---
@@ -61,26 +60,11 @@ Claude 与 Claude Code 在运行时不仅请求主域名，还会并发请求 CD
 10. **控制并发请求**：
     - 单一出口 IP 下并发请求建议控制在 **5 个以内**。
 11. **网络路径要短且干净**：
-    - 物理距离优先级：**亚洲 → 亚洲（如台湾/日本/新加坡家宽，延迟低且同属或邻近时区）** > 亚洲 → 美西 > 避免跨欧洲绕路。
+    - 物理距离优先级：**亚洲 → 亚洲（如台湾/日本/新加坡家宽，延迟低）** > 亚洲 → 美西 > 避免跨欧洲绕路。
 
 ---
 
-## 3. 系统时区隐写机制与无感修复（源自 `timezone.html`）
-
-- **检测机制**：
-  - `ip.net.coffee/claude/` 及 Claude Code (2.1.91+) 会读取系统本地 IANA 时区名称（`Intl.DateTimeFormat().resolvedOptions().timeZone`）。
-  - 只要检测到系统时区名称为 `Asia/Shanghai`、`Asia/Chongqing`、`Asia/Harbin`、`Asia/Urumqi` 或 `Asia/Beijing`，即便你的代理节点同样位于 UTC+8 东八区（如台湾 `Asia/Taipei`），也会触发大陆时区特征标记。
-- **无感修复方案（推荐）**：
-  - 将系统时区从「中国标准时间 (`Asia/Shanghai`)」修改为同属 **UTC+8 东八区** 的 **台北 (`Asia/Taipei`)** 或 **新加坡 (`Asia/Singapore`)**。
-  - **优点**：电脑系统显示的时间一秒不差，不影响任何日常办公与日程，但 IANA 时区标识变为 `Asia/Taipei` 或 `Asia/Singapore`，彻底消除大陆时区警告：
-    ```bash
-    # macOS 一键切换为台北时区（同为 UTC+8）
-    sudo systemsetup -settimezone Asia/Taipei
-    ```
-
----
-
-## 4. 常见故障排查表
+## 3. 常见故障排查表
 
 | 现象 | 原因 | 解决方法 |
 | :--- | :--- | :--- |
