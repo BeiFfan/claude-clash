@@ -76,12 +76,11 @@ bash "<本SKILL所在目录>/scripts/check-env.sh"
 
 ### 核心配置提炼清单（均已内置于 `templates/Script.js`）：
 
-1. **全局防风控基础参数（对应 `claudecode.html` 关键配置 #4, #6）**：
-   - **模拟浏览器 TLS 指纹**：`config["client-fingerprint"] = "chrome"`；
-   - **严格禁用 IPv6**：`config.ipv6 = false` 且 `config.dns.ipv6 = false`（防止 IPv6 绕过代理直连、避免双栈 IP 分裂及 Happy Eyeballs 首次请求超时卡顿）。
+1. **DNS 仅返回 IPv4（对应 `claudecode.html` 关键配置 #6）**：
+   - 设置 `config.dns.ipv6 = false`（应用拿不到 AAAA 记录，强制只走 IPv4，避免双栈 IP 分裂及 Happy Eyeballs 首次请求超时卡顿；同时保留 Clash Verge 顶层 IPv6 开关由客户端根据本机是否有公网 IPv6 控制，防止有公网 IPv6 时绕过 TUN 泄露）。
 2. **独立的 `🦀 Claude` 手动选择策略组（对应关键配置 #1, #2, #7）**：
    - 类型固定为 `select`（手动固定节点，严禁使用 `url-test` 或 `load-balance` 导致会话中途频繁跳 IP）；
-   - 自动排除 `CN/HK/MO/RU/BY/KP/IR/SY/CU` 等受限地区节点，将用户选定的家宽/原生节点置顶。
+   - 使用单词边界正则排除 `CN/HK/MO/RU/BY/KP/IR/SY/CU` 等受限地区节点（避免误伤 `Sydney`/`Ireland`/`Mobile` 等节点），将用户选定的家宽/原生节点置顶。
 3. **全量 Claude & 遥测前置分流规则（参考 `site.html` + 关键配置 #8 规则置顶）**：
    - **核心域名（`DOMAIN-SUFFIX`）**：`anthropic.com`, `claude.ai`, `claude.com`, `clau.de`, `claude.dev`, `claude.app`, `claudemcpclient.com`, `claudemcpcontent.com`, `claudeusercontent.com`
    - **CDN 与基础设施（`DOMAIN`）**：`servd-anthropic-website.b-cdn.net`, `anthropic.com.cdn.cloudflare.net`
@@ -93,7 +92,7 @@ bash "<本SKILL所在目录>/scripts/check-env.sh"
    - **冲突清理**：自动剔除原订阅中将 `api.statsig.com`、`sentry.io`、`datadoghq.com` 分流至广告拦截组或其他代理组的冲突规则。
 4. **强制 TCP 与 WebRTC STUN 防泄露（对应关键配置 #3）**：
    - 许多机场的「家宽节点」采用**「前置机房中转 + 家宽链式落地」**架构：TCP 走家宽 IP，但 UDP 直接从前置机房出站，导致 `ip.net.coffee/claude/` 报 `WebRTC UDP 出口异常`。
-   - 默认将 `STUN_MODE` 设为 `"REJECT"`：从 `fake-ip-filter` 中移除 `stun.*`，并在规则中将 `stun.l.google.com`、`stun1~4.l.google.com`、`stun.cloudflare.com` 及端口 `3478`、`19302` 设为 `REJECT`。既不禁用浏览器 `RTCPeerConnection` API（不破坏浏览器指纹），又在网络层彻底阻断不一致的 UDP 机房 IP 泄露。
+   - 默认将 `STUN_MODE` 设为 `"REJECT"`：从 `fake-ip-filter` 中移除 `stun.*`，并在规则中按域名将 `stun.l.google.com`、`stun1~4.l.google.com`、`stun.cloudflare.com` 设为 `REJECT`（仅按域名拦截，不全局拦截 `3478`/`19302` 端口以免误伤腾讯会议/Zoom 等视频会议）。既不禁用浏览器 `RTCPeerConnection` API（不破坏浏览器指纹），又在网络层彻底阻断不一致的 UDP 机房 IP 泄露。
 5. **DNS 必须走代理且防国内泄露（对应关键配置 #5）**：
    - 开启 `respect-rules: true`、`prefer-h3: false`、`enhanced-mode: "fake-ip"`；
    - 将上述所有 Claude 核心、认证、CDN、遥测域名在 `nameserver-policy` 中绑定到 `https://1.1.1.1/dns-query#🦀 Claude` 和 `https://8.8.8.8/dns-query#🦀 Claude`；

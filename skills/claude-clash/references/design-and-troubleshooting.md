@@ -43,14 +43,14 @@ Claude 与 Claude Code 在运行时不仅请求主域名，还会并发请求 CD
 3. **强制 TCP，远离 UDP（解决机场链式家宽 UDP 出口分裂）**：
    - Claude 底层为 HTTPS（TCP）。许多机场的「家宽节点」采用**「前置机房中转 + 家宽链式落地」**架构：TCP 流量被转发至中华电信等家宽 IP，但 UDP 流量未进家宽隧道而是直接从前置机房出站。
    - 若放行 WebRTC STUN UDP 请求，浏览器会暴露前置机房的 Datacenter IP，导致在 `ip.net.coffee/claude/` 上报 **「WebRTC UDP 泄露：可能泄露 / UDP 出口异常」**。
-   - **解决方案**：在 `Script.js` 中默认设置 `STUN_MODE = "REJECT"`，从 `fake-ip-filter` 中移除 `stun.*`，并将 STUN 域名与端口（`3478`、`19302`）设为 `REJECT`。这样无需禁用浏览器 `RTCPeerConnection` API（不破坏浏览器指纹），即可在网络层阻断不一致的 UDP 出口暴露。
+   - **解决方案**：在 `Script.js` 中默认设置 `STUN_MODE = "REJECT"`，从 `fake-ip-filter` 中移除 `stun.*`，并按域名将 STUN 服务器（`stun.l.google.com`、`stun.cloudflare.com` 等）设为 `REJECT`（不全局拦截 `3478`/`19302` 端口以免影响腾讯会议/Zoom 等视频会议）。这样无需禁用浏览器 `RTCPeerConnection` API（不破坏浏览器指纹），即可在网络层阻断不一致的 UDP 出口暴露。
 4. **TLS 指纹模拟浏览器**：
-   - 在 Mihomo 全局配置中设置 `client-fingerprint: chrome`，避免代理客户端裸握手特征。
+   - 浏览器与 Claude Code 本身发起的端到端 HTTPS 握手已具备标准 TLS 指纹；若自建 VLESS/Trojan 节点可在节点项配置 `client-fingerprint: chrome`。
 5. **DNS 必须走代理且防泄露**：
    - 在 `nameserver-policy` 中将所有 Claude 及关联域名绑定至 `https://1.1.1.1/dns-query#🦀 Claude` 和 `https://8.8.8.8/dns-query#🦀 Claude`，开启 `respect-rules: true`。
    - 为订阅末尾的 `GEOIP,CN` 规则强制加上 `,no-resolve`，防止访问未知海外域名（如 `*.d.ip.net.coffee`）时触发国内 DoH 解析而暴露国内 DNS 出口。
-6. **严格禁用 IPv6（`ipv6: false`）**：
-   - 双栈环境下存在 Happy Eyeballs 竞争导致首次请求卡顿，且部分客户端仅对 IPv4 分流而让 IPv6 直连泄露。在 `Script.js` 中设置 `config.ipv6 = false` 和 `config.dns.ipv6 = false`，强制仅解析和使用 IPv4。
+6. **DNS 禁用 IPv6 解析（`dns.ipv6: false`）**：
+   - 双栈环境下存在 Happy Eyeballs 竞争导致首次请求卡顿，且双栈出口不一致易触发风控。在 `Script.js` 中设置 `config.dns.ipv6 = false` 仅返回 IPv4 `A` 记录（顶层 `ipv6` 开关则交由 Clash Verge 根据本机是否有公网 IPv6 控制，防止有公网 IPv6 时绕过 TUN）。
 7. **Claude 单独分流**：
    - 建立独立的 `🦀 Claude` 策略组，与日常浏览网页的通用代理组解耦。
 8. **规则置顶，不混入智能分流**：

@@ -59,8 +59,9 @@ with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                 if val:
                     names.append(val)
 
-exclude_kw = ['香港', 'HK', 'HONG KONG', '澳门', 'MO', 'MACAU', '俄罗斯', 'RU', '白俄罗斯', 'BY', '剩余流量', '到期', '官网', '套餐']
-valid = [n for n in names if not any(k in n.upper() for k in exclude_kw)]
+exclude_cn = ['香港', '澳门', '大陆', '俄罗斯', '白俄', '朝鲜', '伊朗', '叙利亚', '古巴', '剩余流量', '到期', '官网', '套餐']
+exclude_code_re = re.compile(r'(^|[^A-Za-z])(HK|MO|CN|RU|BY|KP|IR|SY|CU|HONG KONG|MACAU|RUSSIA|BELARUS)([^A-Za-z]|$)', re.I)
+valid = [n for n in names if not any(w in n for w in exclude_cn) and not exclude_code_re.search(n)]
 res = [n for n in valid if re.search(r'家宽|住宅|residential|isp|原生', n, re.I)]
 other = [n for n in valid if n not in res]
 
@@ -92,10 +93,11 @@ fi
 
 if [[ -n "$IPV6_OUT" ]]; then
   echo "PUBLIC_IPV6=YES (${IPV6_OUT})"
+  echo "提示：本机存在公网 IPv6，Clash Verge「设置 → Clash 设置 → IPv6」应保持【开启】以便 TUN 接管 IPv6 流量；Script.js 已设置 dns.ipv6: false 仅解析 IPv4 A 记录。"
 else
   echo "PUBLIC_IPV6=NO"
+  echo "提示：本机无公网 IPv6，Script.js 已默认设置 dns.ipv6: false 强制仅解析 IPv4，防止双栈泄漏与超时卡顿。"
 fi
-echo "提示：遵循 claudecode.html 关键配置 #6，Script.js 已默认设置 ipv6: false 强制走 IPv4，防止双栈泄漏与超时卡顿。"
 
 echo ""
 echo "=== 3. ip.net.coffee/claude 专项全套自动化检验 ==="
@@ -161,11 +163,12 @@ if claude_ip != "FAILED":
         city = risk.get("city", "")
         asn = risk.get("asn", "")
         org = risk.get("asOrganization", "")
-        vpn = risk.get("isVpn", False)
-        proxy = risk.get("isProxy", False)
-        tor = risk.get("isTor", False)
-        crawler = risk.get("isCrawler", False)
-        abuse = risk.get("isAbuse", False)
+        vpn = risk.get("is_vpn", risk.get("isVpn", False))
+        proxy = risk.get("is_proxy", risk.get("isProxy", False))
+        tor = risk.get("is_tor", risk.get("isTor", False))
+        crawler = risk.get("is_crawler", risk.get("isCrawler", False))
+        abuse = risk.get("is_abuser", risk.get("isAbuse", False))
+        abuser_score = risk.get("abuser_score", "")
 
         restricted_cc = {'CN', 'HK', 'MO', 'RU', 'KP', 'IR', 'BY', 'SY', 'CU'}
         region_ok = "正常 (受支持地区)" if cc not in restricted_cc else f"❌ 受限地区 ({cc})"
@@ -177,7 +180,7 @@ if claude_ip != "FAILED":
         print(f"  - 归属地与城市          : {country} {city} ({cc})")
         print(f"  - IP 属性               : {ip_type}")
         print(f"  - ASN / 运营商          : AS{asn} ({org})")
-        print(f"  - 安全检测 (越少越好)   : VPN={vpn} | Proxy={proxy} | Tor={tor} | Crawler={crawler} | Abuse={abuse}")
+        print(f"  - 安全检测 (越少越好)   : VPN={vpn} | Proxy={proxy} | Tor={tor} | Crawler={crawler} | Abuse={abuse}" + (f" ({abuser_score})" if abuser_score else ""))
     except Exception as e:
         print(f"\n[ip.net.coffee Claude 出口纯净度评分]: 获取失败 ({e})")
 

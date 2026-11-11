@@ -24,15 +24,11 @@ function main(config, profileName) {
   // 若设为 true 但订阅中没有此类节点，会自动回退为所有非禁区节点
   const PREFER_RESIDENTIAL_ONLY = true;
 
-  // 排除 Anthropic 不支持的地区关键词（CN/HK/MO/RU/BY/KP/IR/SY/CU）
-  const EXCLUDE_REGION_KEYWORDS = [
-    "香港", "HK", "Hong Kong",
-    "澳门", "MO", "Macau",
-    "中国", "CN", "China",
-    "俄罗斯", "RU", "Russia",
-    "白俄罗斯", "BY", "Belarus",
-    "朝鲜", "KP", "伊朗", "IR", "叙利亚", "SY", "古巴", "CU"
-  ];
+  // 排除 Anthropic 不支持的地区（CN/HK/MO/RU/BY/KP/IR/SY/CU）
+  // 中文关键词按子串匹配；英文代码按「前后非字母」边界匹配，避免误伤 SYDNEY / IRELAND / MOBILE 等
+  // 注意：不使用「中国」二字，因为部分机场把台湾节点写成「中国台湾」
+  const EXCLUDE_REGION_CN_WORDS = ["香港", "澳门", "大陆", "俄罗斯", "白俄", "朝鲜", "伊朗", "叙利亚", "古巴"];
+  const EXCLUDE_REGION_CODES = ["HK", "MO", "CN", "RU", "BY", "KP", "IR", "SY", "CU", "Hong Kong", "Macau", "Russia", "Belarus"];
 
   // WebRTC STUN 处理模式（对应 11 项关键配置之「强制 TCP，远离 UDP」）：
   // - "REJECT"（默认推荐）：在 Clash 网络层拦截 STUN UDP 探测与 QUIC，不改浏览器设置即可防止
@@ -40,8 +36,10 @@ function main(config, profileName) {
   // - "PROXY"：将 STUN 流量路由至 🦀 Claude 策略组（仅适用于 TCP 与 UDP 出口 IP 完全一致的单跳原生节点）。
   const STUN_MODE = "REJECT";
 
-  // 是否强制关闭 IPv6（对应 11 项关键配置之「禁用 IPv6」，防止双栈分流泄露与 Happy Eyeballs 超时卡顿）
-  const DISABLE_IPV6 = true;
+  // 是否让 DNS 只返回 IPv4（对应关键配置「禁用 IPv6」）：dns.ipv6 = false，应用拿不到 AAAA 记录，只走 IPv4。
+  // 注意：脚本「不」修改顶层 ipv6 开关——它由 Clash Verge「设置 → IPv6」控制：
+  //   本机有公网 IPv6 时必须保持打开，否则 IPv6 流量可能绕过 TUN 直连泄露；无公网 IPv6 时可关闭。
+  const DNS_IPV4_ONLY = true;
 
   // 自定义直连域名后缀（例如学校内网、论文数据库、常用国内网站等，订阅更新后自动保留）
   const CUSTOM_DIRECT_SUFFIXES = [
@@ -59,23 +57,16 @@ function main(config, profileName) {
   const CUSTOM_NAMESERVER_POLICY = {};
 
   // ==========================================
-  // 0. 全局基础防风控参数（TLS 指纹伪装 & 禁用 IPv6）
-  // ==========================================
-  // 关键配置 #4：TLS 指纹模拟 Chrome 浏览器，避免代理客户端裸握手特征
-  config["client-fingerprint"] = config["client-fingerprint"] || "chrome";
-
-  // 关键配置 #6：严格禁用 IPv6，消除 IPv6 绕过代理直连或双栈出口分裂
-  if (DISABLE_IPV6) {
-    config.ipv6 = false;
-  }
-
-  // ==========================================
   // 1. 构建独立的「🦀 Claude」手动选择策略组（关键配置 #2 & #7）
   //    固定使用 select 类型，严禁使用 url-test 自动跳变 IP
   // ==========================================
   const allProxies = (config.proxies || []).map(p => p.name);
+  const regionCodeRegex = new RegExp(
+    `(^|[^A-Za-z])(${EXCLUDE_REGION_CODES.join("|")})([^A-Za-z]|$)`,
+    "i"
+  );
   const supportedProxies = allProxies.filter(
-    name => !EXCLUDE_REGION_KEYWORDS.some(kw => name.toUpperCase().includes(kw.toUpperCase()))
+    name => !EXCLUDE_REGION_CN_WORDS.some(w => name.includes(w)) && !regionCodeRegex.test(name)
   );
   const basePool = supportedProxies.length ? supportedProxies : allProxies;
 
@@ -176,7 +167,7 @@ function main(config, profileName) {
   config.dns["enhanced-mode"] = "fake-ip";
   config.dns["prefer-h3"] = false;
   config.dns["respect-rules"] = true;
-  if (DISABLE_IPV6) {
+  if (DNS_IPV4_ONLY) {
     config.dns.ipv6 = false;
   }
 
@@ -225,16 +216,10 @@ function main(config, profileName) {
   // ==========================================
   // 4. 构建置顶分流规则（关键配置 #3, #7, #8：规则置顶，不混入智能分流）
   // ==========================================
+  // 只按域名处理 STUN，不按端口全局拦截：3478 也是腾讯会议 / Zoom / Teams 等音视频的常用端口，
+  // 全局 DST-PORT REJECT 会误伤国内外视频会议。fake-ip 模式下 UDP 也能按域名命中规则。
   const stunTarget = STUN_MODE === "PROXY" ? CLAUDE_GROUP : "REJECT";
-  const stunRules = [
-    ...stunDomains.map(d => `DOMAIN,${d},${stunTarget}`),
-    ...(STUN_MODE === "REJECT"
-      ? [
-          "DST-PORT,3478,REJECT",
-          "DST-PORT,19302,REJECT"
-        ]
-      : [])
-  ];
+  const stunRules = stunDomains.map(d => `DOMAIN,${d},${stunTarget}`);
 
   const claudeRules = [
     // 后缀域名
@@ -247,7 +232,6 @@ function main(config, profileName) {
     ...stunRules,
     // Anthropic 官方 AS399358 IPv4 (/21) 与 IPv6 (/32) 全量网段兜底（带 no-resolve）
     `IP-CIDR,160.79.104.0/21,${CLAUDE_GROUP},no-resolve`,
-    `IP-CIDR,160.79.104.0/23,${CLAUDE_GROUP},no-resolve`,
     `IP-CIDR6,2607:6bc0::/32,${CLAUDE_GROUP},no-resolve`
   ];
 

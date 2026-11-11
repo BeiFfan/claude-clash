@@ -22,9 +22,8 @@
    - **监控、A/B 测试与风控遥测**：`sentry.io`、`statsig.com`、`statsigapi.net`、`featuregates.org`、`featureassets.org`、`segment.io`、`datadoghq.com`、`browser-intake-us5-datadoghq.com`（独立连字符根域名精确匹配），以及关键词兜底 `datadog` / `sentry` / `sift`（Sift 反欺诈）
    - **官方 ASN / IP 段兜底**：Anthropic `AS399358` 全量 IPv4（`160.79.104.0/21`）与 IPv6（`2607:6bc0::/32`）网段（均带 `no-resolve`），并自动剔除原订阅广告拦截组误杀 `api.statsig.com` / `sentry.io` 的冲突规则。
 3. **11 项关键网络防风控加固（源自 [`claudecode.html`](https://ip.net.coffee/claude/claudecode.html)）**
-   - **强制 TCP，远离 UDP / 阻断链式家宽 STUN 泄露**：许多机场的「家宽节点」采用「前置机房中转 + 家宽链式落地」（TCP 走家宽，UDP 落回前置机房）。脚本默认在 Clash 网络层拦截 STUN UDP 探测（`STUN_MODE = "REJECT"`），无需禁用浏览器 WebRTC API 即可彻底消除 UDP 出口 IP 不一致警告；
-   - **严格禁用 IPv6（`ipv6: false`）**：消除双栈环境下 IPv6 绕过代理直连泄露及 Happy Eyeballs 首次请求超时卡顿；
-   - **模拟浏览器 TLS 指纹（`client-fingerprint: chrome`）**：消除代理客户端裸握手特征；
+   - **强制 TCP，远离 UDP / 阻断链式家宽 STUN 泄露**：许多机场的「家宽节点」采用「前置机房中转 + 家宽链式落地」（TCP 走家宽，UDP 落回前置机房）。脚本默认在 Clash 网络层按域名拦截 STUN UDP 探测（`STUN_MODE = "REJECT"`，不全局封禁端口以免误伤腾讯会议/Zoom），无需禁用浏览器 WebRTC API 即可彻底消除 UDP 出口 IP 不一致警告；
+   - **DNS 仅返回 IPv4（`dns.ipv6: false`）**：让应用拿不到 AAAA 记录、强制只走 IPv4，消除双栈出口分裂及 Happy Eyeballs 首次请求超时卡顿；
    - **DNS 强制走代理 + 封堵 `GEOIP,CN` 泄露**：所有 Claude 及关联遥测域名通过 `#🦀 Claude` 绑定海外加密 DoH（`1.1.1.1` / `8.8.8.8`），开启 `respect-rules: true`，并为末尾 `GEOIP,CN` 自动补齐 `,no-resolve`。
 4. **内置 `ip.net.coffee/claude` 自动化体检脚本（[`check-env.sh`](skills/claude-clash/scripts/check-env.sh)）**
    - 一键在终端检测：Claude 进程安全状态、三出口 IP 分流对比、**Claude 出口 Trust Score 信任评分（0~100）**、**是否家庭住宅 IP (ISP)**、5 项黑名单记录、动态子域名权威 DNS 泄露实测及 STUN UDP 状态。
