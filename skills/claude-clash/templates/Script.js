@@ -1,293 +1,317 @@
 /**
- * claude-clash — Clash Verge Rev (Mihomo) 全局扩展脚本通用模板
- *
- * 参考标准：
- * - Claude AI IP 风险检测：https://ip.net.coffee/claude/
- * - Claude Code 域名分流规则大全：https://ip.net.coffee/claude/site.html
- * - Claude Code 稳定使用指南（11 项关键配置）：https://ip.net.coffee/claude/claudecode.html
- *
- * ⚠️ 重要安全准则：
- * 在保存/启用本脚本、切换节点或开关 TUN 模式前，请务必确保 Claude（桌面客户端、
- * 终端 Claude Code CLI、浏览器 claude.ai 标签页）处于【完全关闭】状态，防止会话中途 IP 跳变触发风控！
+ * Clash Verge Rev / Mihomo 全局扩展脚本。
+ * 用于代理环境下的 Claude 网络优化：稳定同出口，减少旁路和出口混用。
+ * 只变换传入配置；不启动程序、不发请求。保存/重载前关闭相关客户端和网页。
+ * Claude 网络环境优先：多层域名兜底、共享服务同出口、关闭内核/DNS IPv6。
  */
+const CLAUDE_POLICY = {
+  group: "🦀 Claude",
+  // 只列在线规则集之外的补充域名，核心域名由 Anthropic 规则集和关键词覆盖。
+  suffixes: ["sentry.io", "statsig.com", "statsigapi.net", "segment.io", "featuregates.org",
+    "featureassets.org", "datadoghq.com", "intercom.io", "intercomcdn.com"],
+  exact: ["anthropic.com.cdn.cloudflare.net", "anthropic.auth0.com", "anthropic-com.ghost.io",
+    "cdn.usefathom.com", "challenges.cloudflare.com", "browser-intake-us5-datadoghq.com"],
+  // 强标识与关联遥测宁可多匹配，不因缩小其他网站影响而遗漏。
+  keywords: ["claude", "anthropic", "datadog", "sentry", "sift"],
+  keywordRuleSet: "claude-clash-strong-keywords",
+  domainRuleSet: "claude-clash-anthropic",
+  domainRuleUrl: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/anthropic.yaml",
+  // 国内直连/节点引导沿用小小东；默认和管理域名 DNS 按用户确认经 Claude 组。
+  domesticResolvers: ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"],
+  overseasResolvers: ["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"],
+  bootstrapResolvers: ["223.5.5.5", "119.29.29.29"],
+  dnsSuffixes: ["anthropic.com", "clau.de", "claude.ai", "claude.com", "claudeusercontent.com"],
+  dnsFilter: ["*.lan", "+.local", "+.msftconnecttest.com", "+.msftncsi.com"],
+  stun: ["stun.l.google.com", "stun1.l.google.com", "stun2.l.google.com",
+    "stun3.l.google.com", "stun4.l.google.com", "stun.cloudflare.com"],
+  cidrs: [["IP-CIDR", "160.79.104.0/21"], ["IP-CIDR6", "2607:6bc0::/32"]]
+};
 
-function main(config, profileName) {
-  // ==========================================
-  // 用户可自定义参数区
-  // ==========================================
-  const CLAUDE_GROUP = "🦀 Claude";
-
-  // 首选节点匹配关键词（留空 "" 则不特定置顶；可填如 "台湾家宽"、"美国"、"日本" 等）
+function splitRule(rule) {
+  const parts = []; let depth = 0, start = 0;
+  for (let i = 0; i < rule.length; i++) {
+    if (rule[i] === "(") depth++;
+    if (rule[i] === ")") depth--;
+    if (depth < 0) throw new Error("RULE_PARENTHESES_INVALID");
+    if (rule[i] === "," && depth === 0) { parts.push(rule.slice(start, i).trim()); start = i + 1; }
+  }
+  if (depth !== 0) throw new Error("RULE_PARENTHESES_INVALID");
+  parts.push(rule.slice(start).trim());
+  return parts;
+}
+function ruleTargetIndex(parts) {
+  if (parts[0] === "SUB-RULE") return -1;
+  let i = parts.length - 1;
+  while (i > 0 && ["no-resolve", "src"].includes(parts[i])) i--;
+  return i;
+}
+function claudeIpFallback(parts) {
+  return CLAUDE_POLICY.cidrs.some(([kind, cidr]) => parts[0] === kind && parts[1] === cidr &&
+    parts[2] === (kind === "IP-CIDR6" ? "REJECT" : CLAUDE_POLICY.group) && !parts.includes("src"));
+}
+function migrateRule(rule, migrateLegacy) {
+  // 按用户要求，仅 Claude IP 兜底保留 no-resolve，包括子规则中的其他项都移除此参数。
+  const parts = splitRule(rule.replace(/,no-resolve(?=[,)]|$)/g, "")), i = ruleTargetIndex(parts);
+  if (migrateLegacy && i > 0 && parts[i] === "Claude") parts[i] = CLAUDE_POLICY.group;
+  if (claudeIpFallback(parts)) parts.push("no-resolve");
+  return parts.join(",");
+}
+function domainMatchers() {
+  const p = CLAUDE_POLICY;
+  return [...p.suffixes.map(d => `DOMAIN-SUFFIX,${d}`), ...p.exact.map(d => `DOMAIN,${d}`),
+    ...p.keywords.map(d => `DOMAIN-KEYWORD,${d}`), `RULE-SET,${p.domainRuleSet}`];
+}
+function udpReject(matcher) { return `AND,((NETWORK,udp),(${matcher})),REJECT`; }
+function managedRules(stunMode) {
+  const p = CLAUDE_POLICY;
+  const guards = [...domainMatchers(), ...p.cidrs.map(([t, c]) => `${t},${c}`)]
+    .map(udpReject);
+  const ipv6Guards = domainMatchers().map(m =>
+    `AND,((${m}),(IP-CIDR6,::/0)),REJECT`);
+  const stunRules = [];
+  for (const host of stunMode === "OFF" ? [] : p.stun) {
+    if (stunMode === "PROXY") {
+      stunRules.push(`AND,((NETWORK,udp),(DOMAIN,${host})),${p.group}`);
+    }
+    // UDP 不支持时也不允许继续落入后面的 DIRECT/MATCH。
+    stunRules.push(udpReject(`DOMAIN,${host}`));
+  }
+  return [...guards, ...ipv6Guards, ...stunRules,
+    ...domainMatchers().map(m => `${m},${p.group}`),
+    ...p.cidrs.map(([t, c]) => `${t},${c},${t === "IP-CIDR6" ? "REJECT" : p.group},no-resolve`)];
+}
+function managedDnsKey(key) {
+  const d = key.toLowerCase().replace(/^[+*.]+/, "");
+  if (/^(geosite|rule-set):/.test(d)) return false;
+  return [...CLAUDE_POLICY.dnsSuffixes, ...CLAUDE_POLICY.suffixes].some(s => d === s || d.endsWith("." + s)) ||
+    CLAUDE_POLICY.exact.includes(d) || CLAUDE_POLICY.keywords.some(k => d.includes(k));
+}
+function keywordProviderDefinition() {
+  return {type: "inline", behavior: "classical", format: "yaml",
+    payload: CLAUDE_POLICY.keywords.map(k => `DOMAIN-KEYWORD,${k}`)};
+}
+function validKeywordProvider(provider) {
+  const expected = keywordProviderDefinition();
+  return !!provider && provider.type === expected.type && provider.behavior === expected.behavior &&
+    provider.format === expected.format && Array.isArray(provider.payload) &&
+    provider.payload.length === expected.payload.length && expected.payload.every(r => provider.payload.includes(r));
+}
+function installKeywordProvider(config) {
+  if (config["rule-providers"] !== undefined &&
+    (!config["rule-providers"] || typeof config["rule-providers"] !== "object" || Array.isArray(config["rule-providers"]))) {
+    throw new Error("RULE_PROVIDERS_INVALID");
+  }
+  config["rule-providers"] = config["rule-providers"] || {};
+  const key = CLAUDE_POLICY.keywordRuleSet;
+  if (Object.prototype.hasOwnProperty.call(config["rule-providers"], key)) {
+    const provider = config["rule-providers"][key];
+    const legacy = provider && provider.type === "inline" && provider.behavior === "classical" &&
+      provider.format === "yaml" && Array.isArray(provider.payload) && provider.payload.length === 2 &&
+      ["DOMAIN-KEYWORD,claude", "DOMAIN-KEYWORD,anthropic"].every(r => provider.payload.includes(r));
+    if (legacy) provider.payload = keywordProviderDefinition().payload;
+    else if (!validKeywordProvider(provider)) throw new Error("KEYWORD_PROVIDER_NAME_COLLISION");
+  } else config["rule-providers"][key] = keywordProviderDefinition();
+}
+function domainProviderDefinition() {
+  // 0 关闭内核定时刷新；无有效缓存时仍需首次下载，后续由用户手动更新。
+  return {type: "http", behavior: "domain", format: "yaml", url: CLAUDE_POLICY.domainRuleUrl,
+    path: "./rule-providers/claude-clash-anthropic.yaml", interval: 0, proxy: CLAUDE_POLICY.group};
+}
+function validDomainProvider(provider) {
+  return !!provider && Object.entries(domainProviderDefinition()).every(([key, value]) => provider[key] === value);
+}
+function installDomainProvider(config) {
+  const key = CLAUDE_POLICY.domainRuleSet;
+  if (Object.prototype.hasOwnProperty.call(config["rule-providers"], key)) {
+    const provider = config["rule-providers"][key];
+    // 兼容本项目先前的每日更新定义；同名其他来源仍停止，避免覆盖个人规则。
+    if (provider && provider.interval === 86400 && validDomainProvider(Object.assign({}, provider, {interval: 0}))) {
+      provider.interval = 0;
+    } else if (!validDomainProvider(provider)) throw new Error("DOMAIN_PROVIDER_NAME_COLLISION");
+  } else config["rule-providers"][key] = domainProviderDefinition();
+}
+function claudeResolvers() {
+  return CLAUDE_POLICY.overseasResolvers.map(value => `${value}#${CLAUDE_POLICY.group}`);
+}
+function resolverProxy(value) {
+  if (typeof value !== "string" || !value.includes("#")) return null;
+  const fragment = value.slice(value.indexOf("#") + 1).split("&")[0];
+  if (!fragment || fragment.includes("=")) return null;
+  try { return decodeURIComponent(fragment); } catch { return fragment; }
+}
+function mapResolvers(dns, mapper) {
+  const mapValue = value => Array.isArray(value) ? value.map(mapValue) :
+    typeof value === "string" ? mapper(value) : value;
+  for (const key of ["nameserver", "fallback", "default-nameserver", "proxy-server-nameserver", "direct-nameserver"]) {
+    if (dns[key] !== undefined) dns[key] = mapValue(dns[key]);
+  }
+  for (const key of ["nameserver-policy", "proxy-server-nameserver-policy"]) {
+    if (dns[key] && typeof dns[key] === "object" && !Array.isArray(dns[key])) {
+      for (const domain of Object.keys(dns[key])) dns[key][domain] = mapValue(dns[key][domain]);
+    }
+  }
+}
+function migrateOtherReferences(config) {
+  const rename = object => {
+    if (object && object["dialer-proxy"] === "Claude") object["dialer-proxy"] = CLAUDE_POLICY.group;
+  };
+  for (const object of [...(config.proxies || []), ...(config["proxy-groups"] || [])]) rename(object);
+  for (const kind of ["proxy-providers", "rule-providers"]) {
+    for (const definition of Object.values(config[kind] || {})) {
+      rename(definition.override);
+      if (definition.proxy === "Claude") definition.proxy = CLAUDE_POLICY.group;
+    }
+  }
+  if (config.dns) mapResolvers(config.dns, value => {
+    if (resolverProxy(value) !== "Claude") return value;
+    const hash = value.indexOf("#"), suffix = value.indexOf("&", hash);
+    return value.slice(0, hash + 1) + CLAUDE_POLICY.group + (suffix < 0 ? "" : value.slice(suffix));
+  });
+}
+function proxyDependencies(config) {
+  const proxies = config.proxies || [], groups = config["proxy-groups"] || [], providers = config["proxy-providers"] || {};
+  const builtins = ["DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL"];
+  const names = new Set([...builtins, ...proxies.map(p => p.name), ...groups.map(g => g.name)]);
+  const graph = new Map(); let dangling = 0;
+  function edge(key, ref) {
+    if (!ref) return;
+    if (typeof ref !== "string" || !names.has(ref)) { dangling++; return; }
+    if (!builtins.includes(ref)) graph.get(key).push("node:" + ref);
+  }
+  for (const item of [...proxies, ...groups]) graph.set("node:" + item.name, []);
+  for (const provider of Object.keys(providers)) graph.set("provider:" + provider, []);
+  for (const item of [...proxies, ...groups]) edge("node:" + item.name, item["dialer-proxy"]);
+  for (const g of groups) {
+    const key = "node:" + g.name;
+    for (const member of g.proxies || []) edge(key, member);
+    const use = g["include-all"] || g["include-all-providers"] ? Object.keys(providers) : g.use || [];
+    for (const provider of use) {
+      if (!Object.prototype.hasOwnProperty.call(providers, provider)) dangling++;
+      else graph.get(key).push("provider:" + provider);
+    }
+    if (g["include-all"] || g["include-all-proxies"]) for (const proxy of proxies) edge(key, proxy.name);
+  }
+  for (const [name, definition] of Object.entries(providers)) {
+    edge("provider:" + name, definition.override && definition.override["dialer-proxy"]);
+    edge("provider:" + name, definition.proxy);
+  }
+  for (const definition of Object.values(config["rule-providers"] || {})) {
+    if (definition.proxy && !names.has(definition.proxy)) dangling++;
+    if (definition.override && definition.override["dialer-proxy"] && !names.has(definition.override["dialer-proxy"])) dangling++;
+  }
+  const visiting = new Set(), visited = new Set();
+  function visit(key) {
+    if (visiting.has(key)) return true;
+    if (visited.has(key)) return false;
+    visiting.add(key);
+    for (const child of graph.get(key) || []) if (visit(child)) return true;
+    visiting.delete(key); visited.add(key); return false;
+  }
+  return {dangling, cycle: [...graph.keys()].some(visit)};
+}
+function main(input, profileName, overrides) {
+  // 用户参数。第三个参数仅供离线工具/测试使用，Verge 调用只需 main(config)。
   const PREFERRED_NODE_KEYWORD = "";
-
-  // 是否优先仅筛选名称中带「家宽 / 住宅 / Residential / ISP / 原生」的节点进入 Claude 策略组
-  // 若设为 true 但订阅中没有此类节点，会自动回退为所有非禁区节点
-  const PREFER_RESIDENTIAL_ONLY = true;
-
-  // 排除 Anthropic 不支持的地区（CN/HK/MO/RU/BY/KP/IR/SY/CU）
-  // 中文关键词按子串匹配；英文代码按「前后非字母」边界匹配，避免误伤 SYDNEY / IRELAND / MOBILE 等
-  // 注意：不使用「中国」二字，因为部分机场把台湾节点写成「中国台湾」
-  const EXCLUDE_REGION_CN_WORDS = ["香港", "澳门", "大陆", "俄罗斯", "白俄", "朝鲜", "伊朗", "叙利亚", "古巴"];
-  const EXCLUDE_REGION_CODES = ["HK", "MO", "CN", "RU", "BY", "KP", "IR", "SY", "CU", "Hong Kong", "Macau", "Russia", "Belarus"];
-
-  // WebRTC STUN 处理模式（对应 11 项关键配置之「强制 TCP，远离 UDP」）：
-  // - "REJECT"（默认推荐）：在 Clash 网络层拦截 STUN UDP 探测与 QUIC，不改浏览器设置即可防止
-  //   机场「链式家宽节点」（TCP 走家宽、UDP 落回前置机房）暴露不一致的机房 UDP IP。
-  // - "PROXY"：将 STUN 流量路由至 🦀 Claude 策略组（仅适用于 TCP 与 UDP 出口 IP 完全一致的单跳原生节点）。
+  // 默认拒绝六个已知公共 STUN 的 UDP；可能影响使用同域名的网页音视频。
   const STUN_MODE = "REJECT";
-
-  // 是否让 DNS 只返回 IPv4（对应关键配置「禁用 IPv6」）：dns.ipv6 = false，应用拿不到 AAAA 记录，只走 IPv4。
-  // 注意：脚本「不」修改顶层 ipv6 开关——它由 Clash Verge「设置 → IPv6」控制：
-  //   本机有公网 IPv6 时必须保持打开，否则 IPv6 流量可能绕过 TUN 直连泄露；无公网 IPv6 时可关闭。
-  const DNS_IPV4_ONLY = true;
-
-  // 自定义直连域名后缀（例如学校内网、论文数据库、常用国内网站等，订阅更新后自动保留）
-  const CUSTOM_DIRECT_SUFFIXES = [
-    // 默认放行 ip.net.coffee 用于检测「中国出口 IPv4」的国内测速源，确保三出口分流对比准确
-    "ip138.com",
-    "ip.cn"
-  ];
-
-  // 自定义直连域名关键词
-  const CUSTOM_DIRECT_KEYWORDS = [
-    // "example"
-  ];
-
-  // 自定义专用 DNS 映射（例如校园网内网 DNS，格式: { "+.example.edu.cn": "202.x.x.x" }）
+  // 按需合并用户已有的直连域名。
+  const CUSTOM_DIRECT_SUFFIXES = [];
+  const CUSTOM_DIRECT_KEYWORDS = [];
   const CUSTOM_NAMESERVER_POLICY = {};
-
-  // ==========================================
-  // 1. 构建独立的「🦀 Claude」手动选择策略组（关键配置 #2 & #7）
-  //    固定使用 select 类型，严禁使用 url-test 自动跳变 IP
-  // ==========================================
-  const allProxies = (config.proxies || []).map(p => p.name);
-  const regionCodeRegex = new RegExp(
-    `(^|[^A-Za-z])(${EXCLUDE_REGION_CODES.join("|")})([^A-Za-z]|$)`,
-    "i"
-  );
-  const supportedProxies = allProxies.filter(
-    name => !EXCLUDE_REGION_CN_WORDS.some(w => name.includes(w)) && !regionCodeRegex.test(name)
-  );
-  const basePool = supportedProxies.length ? supportedProxies : allProxies;
-
-  const residentialRegex = /家宽|住宅|residential|isp|原生/i;
-  const residentialNodes = PREFER_RESIDENTIAL_ONLY
-    ? basePool.filter(name => residentialRegex.test(name))
-    : [];
-  const candidateNodes = residentialNodes.length ? residentialNodes : basePool;
-
-  if (candidateNodes.length) {
-    let ordered = candidateNodes;
-    if (PREFERRED_NODE_KEYWORD) {
-      const matched = candidateNodes.filter(n => n.includes(PREFERRED_NODE_KEYWORD));
-      const rest = candidateNodes.filter(n => !n.includes(PREFERRED_NODE_KEYWORD));
-      if (matched.length) {
-        ordered = [...matched, ...rest];
-      }
+  const options = Object.assign({preferred: PREFERRED_NODE_KEYWORD, stunMode: STUN_MODE,
+    directSuffixes: CUSTOM_DIRECT_SUFFIXES, directKeywords: CUSTOM_DIRECT_KEYWORDS,
+    nameserverPolicy: CUSTOM_NAMESERVER_POLICY}, overrides || {});
+  if (!["OFF", "REJECT", "PROXY"].includes(options.stunMode)) throw new Error("STUN_MODE_INVALID");
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("CONFIG_INVALID");
+  const config = JSON.parse(JSON.stringify(input));
+  installKeywordProvider(config);
+  installDomainProvider(config);
+  const proxies = config.proxies || [], groups = config["proxy-groups"] || [];
+  if (!Array.isArray(proxies) || !Array.isArray(groups)) throw new Error("PROXY_SCHEMA_INVALID");
+  const names = [...proxies, ...groups].map(p => p.name);
+  if (names.some(n => typeof n !== "string") || new Set(names).size !== names.length) throw new Error("PROXY_NAMES_INVALID");
+  if (proxies.some(p => p.name === CLAUDE_POLICY.group)) throw new Error("CLAUDE_GROUP_NAME_COLLISION");
+  const supported = proxies.filter(p => !["direct", "reject", "compatible", "pass"]
+    .includes(String(p.type || "").toLowerCase())).map(p => p.name);
+  const providerConfig = config["proxy-providers"] || {};
+  if (typeof providerConfig !== "object" || Array.isArray(providerConfig)) throw new Error("PROVIDERS_INVALID");
+  const providers = Object.keys(providerConfig);
+  const preferred = options.preferred ? supported.filter(n => n === options.preferred) : [];
+  if (options.preferred && !preferred.length && !providers.length) throw new Error("PREFERRED_NODE_NOT_FOUND");
+  if (!supported.length && !providers.length) throw new Error("NO_ELIGIBLE_PROXY");
+  // 只采用明确选择，不再按地区/家宽等标签猜测；无明确选择时先拒绝，等待手动选择。
+  const ordered = options.preferred ? preferred : supported;
+  const group = {name: CLAUDE_POLICY.group, type: "select", proxies: [...ordered, "REJECT"],
+    "empty-fallback": "REJECT", "default-selected": preferred[0] || "REJECT"};
+  if (providers.length && !preferred.length) group.use = providers;
+  const legacy = groups.some(g => g.name === "Claude");
+  config["proxy-groups"] = [group, ...groups.filter(g => g.name !== "Claude" && g.name !== group.name)
+    .map(g => {
+      const copied = Object.assign({}, g, g.proxies ? {proxies: g.proxies.map(n => legacy && n === "Claude" ? group.name : n)} : {});
+      if (legacy && copied["default-selected"] === "Claude") copied["default-selected"] = group.name;
+      return copied;
+    })];
+  // 若 Claude 是一个真实节点名而不是旧组，保留对该节点的引用。
+  const rules = managedRules(options.stunMode);
+  const direct = [...options.directKeywords.map(k => `DOMAIN-KEYWORD,${k},DIRECT`),
+    ...options.directSuffixes.map(s => `DOMAIN-SUFFIX,${s},DIRECT`)];
+  const keys = new Set([...rules, ...direct].map(r => splitRule(r).slice(0, 2).join(",")));
+  if (config.rules !== undefined && !Array.isArray(config.rules)) throw new Error("RULES_INVALID");
+  const retained = (config.rules || []).map(r => migrateRule(r, legacy)).filter(r =>
+    !keys.has(splitRule(r).slice(0, 2).join(",")));
+  config.rules = [...new Set([...rules, ...direct, ...retained])];
+  if (config["sub-rules"]) {
+    for (const key of Object.keys(config["sub-rules"])) {
+      config["sub-rules"][key] = config["sub-rules"][key].map(r => migrateRule(r, legacy));
     }
-
-    const existingGroups = config["proxy-groups"] || [];
-    const otherGroups = existingGroups.filter(
-      g => g.name !== CLAUDE_GROUP && g.name !== "Claude"
-    );
-
-    config["proxy-groups"] = [
-      { name: CLAUDE_GROUP, type: "select", proxies: ordered },
-      ...otherGroups
-    ];
   }
-
-  // ==========================================
-  // 2. 域名清单定义（参考 https://ip.net.coffee/claude/site.html）
-  // ==========================================
-  // 2.1 后缀匹配域名（覆盖主站、MCP、Sentry 错误监控、Statsig/Segment 遥测、Intercom 客服）
-  const claudeSuffixDomains = [
-    // 核心域名（已覆盖 *.anthropic.com 如 cdn/mcp/console/workbench.anthropic.com）
-    "anthropic.com",
-    "claude.ai",
-    "claude.com",
-    "clau.de",
-    "claude.dev",
-    "claude.app",
-    "claudemcpclient.com",
-    "claudemcpcontent.com",
-    "claudeusercontent.com",
-    // 监控、风控、A/B 测试与遥测上报（必须与主站走同一出口，防止双路径暴露真实 IP）
-    "sentry.io",
-    "statsig.com",
-    "statsigapi.net",
-    "featuregates.org",
-    "featureassets.org",
-    "segment.io",
-    "datadoghq.com",
-    // 客服与第三方组件
-    "intercom.io",
-    "intercomcdn.com"
-  ];
-
-  // 2.2 精确匹配域名（CDN 边缘域名、Auth0 登录认证、Datadog 独立根域名、Turnstile 验证）
-  const claudeExactDomains = [
-    // CDN 与静态资源
-    "servd-anthropic-website.b-cdn.net",
-    "anthropic.com.cdn.cloudflare.net",
-    // Auth0 身份认证与官方内容系统
-    "anthropic.auth0.com",
-    "anthropic-com.ghost.io",
-    // Datadog RUM 遥测（根域名含连字符，DOMAIN-SUFFIX,datadoghq.com 无法命中，必须精确匹配）
-    "browser-intake-us5-datadoghq.com",
-    // 第三方统计与 Cloudflare Turnstile 人机验证
-    "cdn.usefathom.com",
-    "challenges.cloudflare.com"
-  ];
-
-  // 2.3 关键词兜底（覆盖 Datadog 多区域节点 us3/eu1/ap1、Sentry、Sift 反欺诈）
-  const claudeKeywordDomains = [
-    "claude",
-    "anthropic",
-    "datadog",
-    "sentry",
-    "sift"
-  ];
-
-  // 2.4 常用海外 WebRTC STUN 域名
-  const stunDomains = [
-    "stun.l.google.com",
-    "stun1.l.google.com",
-    "stun2.l.google.com",
-    "stun3.l.google.com",
-    "stun4.l.google.com",
-    "stun.cloudflare.com"
-  ];
-
-  // ==========================================
-  // 3. DNS 防污染与防泄露配置（关键配置 #5）
-  // ==========================================
   config.dns = config.dns || {};
-  config.dns.enable = true;
-  config.dns["enhanced-mode"] = "fake-ip";
-  config.dns["prefer-h3"] = false;
-  config.dns["respect-rules"] = true;
-  if (DNS_IPV4_ONLY) {
-    config.dns.ipv6 = false;
+  const dns = config.dns;
+  if (typeof dns !== "object" || Array.isArray(dns)) throw new Error("DNS_INVALID");
+  if (legacy) migrateOtherReferences(config);
+  config.ipv6 = false;
+  Object.assign(dns, {enable: true, ipv6: false, "enhanced-mode": "fake-ip",
+    "cache-algorithm": "arc", "prefer-h3": false, "respect-rules": true,
+    "direct-nameserver-follow-policy": true,
+    "fake-ip-filter-mode": "blacklist", "fake-ip-filter": [...CLAUDE_POLICY.dnsFilter],
+    "fake-ip-range": "198.18.0.1/16",
+    "default-nameserver": [...CLAUDE_POLICY.bootstrapResolvers],
+    nameserver: claudeResolvers(),
+    "direct-nameserver": [...CLAUDE_POLICY.domesticResolvers],
+    "proxy-server-nameserver": [...CLAUDE_POLICY.domesticResolvers]});
+  delete dns["fake-ip-range6"];
+  // 原有 fallback、节点专用解析策略保留，不再无差别清空。
+  const resolvers = claudeResolvers(dns["prefer-h3"]);
+  if (dns["nameserver-policy"] && (typeof dns["nameserver-policy"] !== "object" || Array.isArray(dns["nameserver-policy"]))) {
+    throw new Error("DNS_POLICY_INVALID");
   }
-
-  // 国内与节点服务器解析使用高可用国内 DoH，避免 127.0.0.1:7874 自环或解析死锁
-  const cnDoH = [
-    "https://223.5.5.5/dns-query",
-    "https://doh.pub/dns-query"
-  ];
-  config.dns.nameserver = cnDoH;
-  config.dns["direct-nameserver"] = cnDoH;
-  config.dns["direct-nameserver-follow-policy"] = true;
-  config.dns["proxy-server-nameserver"] = cnDoH;
-
-  // 从 fake-ip-filter 中移除 stun.*，让 WebRTC STUN 请求走 Fake-IP 并命中分流/拦截规则
-  if (Array.isArray(config.dns["fake-ip-filter"])) {
-    config.dns["fake-ip-filter"] = config.dns["fake-ip-filter"].filter(
-      item => !String(item).includes("stun.")
-    );
+  const oldPolicy = Object.assign(Object.create(null), dns["nameserver-policy"] || {}, options.nameserverPolicy);
+  const policy = Object.create(null);
+  // DNS 规则集优先于旧精确域名/geosite 策略；默认及管理域名绑定已确认的代理组。
+  const keywordPolicyKey = `rule-set:${CLAUDE_POLICY.keywordRuleSet}`;
+  const domainPolicyKey = `rule-set:${CLAUDE_POLICY.domainRuleSet}`;
+  policy[keywordPolicyKey] = resolvers;
+  for (const domain of [...CLAUDE_POLICY.dnsSuffixes, ...CLAUDE_POLICY.suffixes]) policy[`+.${domain}`] = resolvers;
+  for (const domain of CLAUDE_POLICY.exact) policy[domain] = resolvers;
+  policy[domainPolicyKey] = resolvers;
+  for (const key of Object.keys(oldPolicy)) {
+    if (key === keywordPolicyKey || key === domainPolicyKey) continue;
+    // 字面域名可用逗号合并；只改命中项，避免把同一键中的无关域名一起改成专属 DNS。
+    const parts = /^(geosite|rule-set):/i.test(key) ? [key] : key.split(",").map(k => k.trim());
+    if (parts.some(managedDnsKey)) {
+      for (const domain of parts) policy[domain] = managedDnsKey(domain) ? resolvers : oldPolicy[key];
+    } else policy[key] = oldPolicy[key];
   }
-
-  config.dns["nameserver-policy"] = config.dns["nameserver-policy"] || {};
-
-  // 合并用户自定义专用 DNS
-  for (const [domainKey, dnsVal] of Object.entries(CUSTOM_NAMESERVER_POLICY)) {
-    config.dns["nameserver-policy"][domainKey] = dnsVal;
-  }
-
-  // Claude 及其关联认证/监控/遥测域名强制使用走 🦀 Claude 策略组的海外加密 DoH
-  const claudeResolvers = [
-    `https://1.1.1.1/dns-query#${CLAUDE_GROUP}`,
-    `https://8.8.8.8/dns-query#${CLAUDE_GROUP}`
-  ];
-
-  for (const domain of claudeSuffixDomains) {
-    config.dns["nameserver-policy"][`+.${domain}`] = claudeResolvers;
-  }
-  for (const domain of claudeExactDomains) {
-    config.dns["nameserver-policy"][domain] = claudeResolvers;
-  }
-  if (STUN_MODE === "PROXY") {
-    for (const domain of stunDomains) {
-      config.dns["nameserver-policy"][domain] = claudeResolvers;
-    }
-  }
-
-  // ==========================================
-  // 4. 构建置顶分流规则（关键配置 #3, #7, #8：规则置顶，不混入智能分流）
-  // ==========================================
-  // 只按域名处理 STUN，不按端口全局拦截：3478 也是腾讯会议 / Zoom / Teams 等音视频的常用端口，
-  // 全局 DST-PORT REJECT 会误伤国内外视频会议。fake-ip 模式下 UDP 也能按域名命中规则。
-  const stunTarget = STUN_MODE === "PROXY" ? CLAUDE_GROUP : "REJECT";
-  const stunRules = stunDomains.map(d => `DOMAIN,${d},${stunTarget}`);
-
-  const claudeRules = [
-    // 后缀域名
-    ...claudeSuffixDomains.map(d => `DOMAIN-SUFFIX,${d},${CLAUDE_GROUP}`),
-    // 精确域名
-    ...claudeExactDomains.map(d => `DOMAIN,${d},${CLAUDE_GROUP}`),
-    // 关键词兜底（含 datadog / sentry / sift）
-    ...claudeKeywordDomains.map(k => `DOMAIN-KEYWORD,${k},${CLAUDE_GROUP}`),
-    // WebRTC STUN 规则（REJECT 阻断 UDP 泄露，或 PROXY 走 Claude 节点）
-    ...stunRules,
-    // Anthropic 官方 AS399358 IPv4 (/21) 与 IPv6 (/32) 全量网段兜底（带 no-resolve）
-    `IP-CIDR,160.79.104.0/21,${CLAUDE_GROUP},no-resolve`,
-    `IP-CIDR6,2607:6bc0::/32,${CLAUDE_GROUP},no-resolve`
-  ];
-
-  const directRules = [
-    ...CUSTOM_DIRECT_KEYWORDS.map(k => `DOMAIN-KEYWORD,${k},DIRECT`),
-    ...CUSTOM_DIRECT_SUFFIXES.map(s => `DOMAIN-SUFFIX,${s},DIRECT`)
-  ];
-
-  // 提取已由前置规则接管的匹配键（类型+目标），用于剔除订阅自带的冲突旧规则
-  const managedRuleKeys = new Set(
-    [...claudeRules, ...directRules].map(r => r.split(",").slice(0, 2).join(","))
-  );
-
-  // ==========================================
-  // 5. 整合订阅自带规则并修复 GEOIP,CN DNS 泄露
-  // ==========================================
-  const originalRules = Array.isArray(config.rules) ? config.rules : [];
-
-  const filteredRules = originalRules
-    .filter(rule => {
-      if (directRules.includes(rule) || claudeRules.includes(rule)) {
-        return false;
-      }
-      if (rule.endsWith(",Claude") || rule.endsWith(`,${CLAUDE_GROUP}`)) {
-        return false;
-      }
-      const parts = rule.split(",");
-      const key = parts.slice(0, 2).join(",");
-      // 移除订阅自带的同域名/同IP段冲突规则（含广告拦截组误杀的 api.statsig.com / sentry / datadog）
-      if (
-        managedRuleKeys.has(key) ||
-        key === "IP-CIDR,2607:6bc0::/48" ||
-        key === "IP-CIDR6,2607:6bc0::/48" ||
-        key === "IP-CIDR,2607:6bc0:11::/48" ||
-        key === "IP-CIDR6,2607:6bc0:11::/48" ||
-        key === "DOMAIN,api.statsig.com" ||
-        key === "DOMAIN-SUFFIX,sentry.io" ||
-        key === "DOMAIN-SUFFIX,datadoghq.com"
-      ) {
-        return false;
-      }
-      return true;
-    })
-    .map(rule => {
-      // 防 DNS 泄露：给所有 GEOIP,CN 规则强制补上 no-resolve
-      if (rule.startsWith("GEOIP,CN,") && !rule.endsWith(",no-resolve")) {
-        return `${rule},no-resolve`;
-      }
-      return rule;
-    });
-
-  config.rules = [
-    ...claudeRules,
-    ...directRules,
-    ...filteredRules
-  ];
-
+  dns["nameserver-policy"] = policy;
+  const dependencies = proxyDependencies(config);
+  if (dependencies.dangling) throw new Error("PROXY_DEPENDENCY_REFERENCE_INVALID");
+  if (dependencies.cycle) throw new Error("PROXY_DEPENDENCY_CYCLE");
   return config;
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {main, policy: CLAUDE_POLICY, splitRule, ruleTargetIndex, claudeIpFallback,
+    managedRules, managedDnsKey, udpReject, proxyDependencies, mapResolvers, resolverProxy,
+    claudeResolvers, domainMatchers, keywordProviderDefinition, validKeywordProvider,
+    domainProviderDefinition, validDomainProvider};
 }

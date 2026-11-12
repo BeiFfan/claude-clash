@@ -1,75 +1,44 @@
-# Claude-Clash 设计原理、11 项关键配置与故障排查手册
+# 配置与验收说明
 
-本文档提炼自以下核心技术标准与实测经验：
-- **Claude AI IP 风险检测专页**：<https://ip.net.coffee/claude/>
-- **Claude Code 域名分流规则大全**：<https://ip.net.coffee/claude/site.html>
-- **Claude Code 稳定使用指南（11 项关键配置）**：<https://ip.net.coffee/claude/claudecode.html>
-- **为什么不建议用 IPv6 访问 Claude Code**：<https://ip.net.coffee/claude/ipv6.html>
+## 域名与策略
 
----
+| 来源 | 内容 |
+| --- | --- |
+| 核心域名 | MetaCubeX `anthropic.yaml` 在线规则集；首次无缓存需下载，之后手动更新 |
+| 本地后缀 | sentry.io、statsig.com、statsigapi.net、segment.io、featuregates.org、featureassets.org、datadoghq.com、intercom.io、intercomcdn.com |
+| 精确主机 | anthropic.com.cdn.cloudflare.net、anthropic.auth0.com、anthropic-com.ghost.io、cdn.usefathom.com、challenges.cloudflare.com、browser-intake-us5-datadoghq.com |
+| 关键词 | claude、anthropic、datadog、sentry、sift；域名分流和 DNS 一起覆盖 |
+| IP 兜底 | 160.79.104.0/21 走 Claude；2607:6bc0::/32 拒绝 |
 
-## 0. 最高安全前提：修改网络前必须关闭 Claude
+管理域名的 TCP 走 `🦀 Claude`，UDP/IPv6 拒绝。策略组手动选择，无自动轮换或 DIRECT 回退；未指定节点先 REJECT。共享服务按域名整体接管，不区分浏览器标签页。
 
-在执行任何 Clash 配置保存、订阅刷新、节点切换或虚拟网卡（TUN）开关操作之前，**必须确保本机所有 Claude 客户端（`Claude.app`）、终端 `claude` (Claude Code CLI) 进程以及浏览器中的 `claude.ai` / `console.anthropic.com` 标签页均已完全关闭**。
+六个已知公共 STUN：stun.l.google.com、stun1 至 stun4.l.google.com、stun.cloudflare.com，默认拒绝 UDP；这不覆盖所有 WebRTC 服务。
 
-- **技术原因**：Claude Web 与 Claude Code 在运行期间会维持 SSE / HTTP/2 长连接，并周期性向 `sentry.io`、`statsigapi.net`、`browser-intake-us5-datadoghq.com` 发送遥测心跳。若在会话活跃时重载 Clash 或切换节点，会导致**同一 Session ID 在几毫秒内发生跨国/跨机房 IP 跳变**，甚至在 TUN 重建瞬间发生直连泄露，这是触发账号封禁的高危诱因。
+## DNS
 
----
+- 默认及管理域名：`https://1.1.1.1/dns-query#🦀 Claude`、`https://8.8.8.8/dns-query#🦀 Claude`。
+- 直连与节点解析器：`https://dns.alidns.com/dns-query`、`https://doh.pub/dns-query`；引导地址为 `223.5.5.5`、`119.29.29.29`。
+- 保留个人 nameserver-policy、fallback 和节点专用策略；这些可能改变解析路径，应用时一并审核。学校/内网等专用 DNS 由用户提供，不附带任何个人地址。
+- fake-IP、ARC、respect-rules、direct-nameserver-follow-policy；关闭 H3 与 DNS IPv6。池为 `198.18.0.1/16`，blacklist 四项为 `*.lan`、`+.local`、`+.msftconnecttest.com`、`+.msftncsi.com`。
 
-## 1. 全量域名与 IP 分流体系（源自 `site.html`）
+默认海外 DoH 绑定 Claude 组是相对小小东国内默认 DNS 的调整。它也影响其他未匹配域名；国内直连和节点引导仍可使用国内 DNS，不能描述为所有 DNS 都走海外。
 
-Claude 与 Claude Code 在运行时不仅请求主域名，还会并发请求 CDN、OAuth 认证、错误监控与反欺诈服务。任何一条漏进直连或其他节点，都会造成「主站 IP 与遥测 IP 分裂」。
+fake-IP 和 53 端口劫持不能证明浏览器独立 DoH 或代理服务端解析已受控。代理可能接收域名后自行解析；手动检测出现中国 DNS 时应结合本地 DNS/连接证据定位。不要只给检测域名增加规则、盲目删系统 DNS 或反复清缓存。
 
-| 类别 | 域名 / 规则 | 用途与关键说明 |
-| :--- | :--- | :--- |
-| **核心域名** (`DOMAIN-SUFFIX`) | `anthropic.com`, `claude.ai`, `claude.com`, `clau.de`, `claude.dev`, `claude.app`, `claudemcpclient.com`, `claudemcpcontent.com`, `claudeusercontent.com` | 覆盖主站、API、MCP 通信、用户上传内容及 `cdn/mcp/console/workbench.anthropic.com` 所有子域名 |
-| **CDN 与边缘节点** (`DOMAIN`) | `servd-anthropic-website.b-cdn.net`, `anthropic.com.cdn.cloudflare.net` | BunnyCDN 静态资源与 Cloudflare CNAME 边缘域名 |
-| **身份认证与内容** (`DOMAIN`) | `anthropic.auth0.com`, `anthropic-com.ghost.io`, `challenges.cloudflare.com` | Auth0 OAuth 登录认证（不受 `anthropic.com` 后缀覆盖，必须单列）、官方博客 CMS、Cloudflare Turnstile 人机验证 |
-| **监控、遥测与风控** (`DOMAIN-SUFFIX` & `DOMAIN`) | `sentry.io`, `statsig.com`, `statsigapi.net`, `featuregates.org`, `featureassets.org`, `segment.io`, `datadoghq.com`, `browser-intake-us5-datadoghq.com` | **特别注意**：`browser-intake-us5-datadoghq.com` 根域名带连字符，`DOMAIN-SUFFIX,datadoghq.com` 无法命中，必须精确匹配；同时必须从机场广告拦截组中剔除 `api.statsig.com` |
-| **关键词兜底** (`DOMAIN-KEYWORD`) | `claude`, `anthropic`, `datadog`, `sentry`, `sift` | 兜底 Datadog 其他区域节点（us3/eu1/ap1）、Sentry 及 Sift 反欺诈检测 |
-| **客服与统计** (`DOMAIN-SUFFIX` & `DOMAIN`) | `intercom.io`, `intercomcdn.com`, `cdn.usefathom.com` | 在线客服组件与 Fathom 统计，保持与主站同出口 |
-| **官方 IP 段兜底** (`IP-CIDR` / `IP-CIDR6`) | `160.79.104.0/21,no-resolve`, `2607:6bc0::/32,no-resolve` | 覆盖 Anthropic 官方自治系统 `AS399358` 全量 2048 个 IPv4 地址及 IPv6 地址段，应对加密 DNS / ECH 未命中域名的情况 |
+## 应用与核对
 
----
+常见配置目录：macOS `~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/`；Linux `~/.local/share/io.github.clash-verge-rev.clash-verge-rev/`；Windows `%APPDATA%\io.github.clash-verge-rev.clash-verge-rev\`。
 
-## 2. Claude Code 稳定使用 11 项关键配置（源自 `claudecode.html`）
+完整链路为订阅原文 → 应用设置 → 全局 Merge/Script → 订阅扩展配置/脚本 → 应用回写。备份后合并个人逻辑，从原订阅生成；检查全局脚本之外的规则、代理、策略组和 DNS/IPv6 覆写。最终文件与已加载状态分别核对；可使用已有本地只读 API 或客户端界面，不额外开放控制接口。
 
-核心原则：**让网络环境表现得尽可能像普通海外家庭宽带用户。**
+运行核对关注 rule 模式、实际已加载规则、规则集、Selector 当前选择及代理链。`/delay`、`/healthcheck`、`/dns/query` 会产生主动流量，不用于只读核对。配置完成后由用户手动检测，工具不提供联网探针。
 
-1. **出口 IP 质量第一**：
-   - 优先级：**家庭宽带/住宅 ISP（最优，Trust Score 95~100）** > 高质量原生 VPS IP > 云厂商机房 IP（AWS/GCP/Azure 极易受同段连带风控） > 万人骑共享代理（严禁）。
-2. **IP 稳定性策略**：
-   - **机房 IP 严禁频繁跳变**；策略组必须使用手动固定选择（`select`），**严禁**对 Claude 使用 `url-test`（自动测速切换）或 `load-balance`（负载均衡）。
-3. **强制 TCP，远离 UDP（解决机场链式家宽 UDP 出口分裂）**：
-   - Claude 底层为 HTTPS（TCP）。许多机场的「家宽节点」采用**「前置机房中转 + 家宽链式落地」**架构：TCP 流量被转发至中华电信等家宽 IP，但 UDP 流量未进家宽隧道而是直接从前置机房出站。
-   - 若放行 WebRTC STUN UDP 请求，浏览器会暴露前置机房的 Datacenter IP，导致在 `ip.net.coffee/claude/` 上报 **「WebRTC UDP 泄露：可能泄露 / UDP 出口异常」**。
-   - **解决方案**：在 `Script.js` 中默认设置 `STUN_MODE = "REJECT"`，从 `fake-ip-filter` 中移除 `stun.*`，并按域名将 STUN 服务器（`stun.l.google.com`、`stun.cloudflare.com` 等）设为 `REJECT`（不全局拦截 `3478`/`19302` 端口以免影响腾讯会议/Zoom 等视频会议）。这样无需禁用浏览器 `RTCPeerConnection` API（不破坏浏览器指纹），即可在网络层阻断不一致的 UDP 出口暴露。
-4. **TLS 指纹模拟浏览器**：
-   - 浏览器与 Claude Code 本身发起的端到端 HTTPS 握手已具备标准 TLS 指纹；若自建 VLESS/Trojan 节点可在节点项配置 `client-fingerprint: chrome`。
-5. **DNS 必须走代理且防泄露**：
-   - 在 `nameserver-policy` 中将所有 Claude 及关联域名绑定至 `https://1.1.1.1/dns-query#🦀 Claude` 和 `https://8.8.8.8/dns-query#🦀 Claude`，开启 `respect-rules: true`。
-   - 为订阅末尾的 `GEOIP,CN` 规则强制加上 `,no-resolve`，防止访问未知海外域名（如 `*.d.ip.net.coffee`）时触发国内 DoH 解析而暴露国内 DNS 出口。
-6. **DNS 禁用 IPv6 解析（`dns.ipv6: false`）**：
-   - 双栈环境下存在 Happy Eyeballs 竞争导致首次请求卡顿，且双栈出口不一致易触发风控。在 `Script.js` 中设置 `config.dns.ipv6 = false` 仅返回 IPv4 `A` 记录（顶层 `ipv6` 开关则交由 Clash Verge 根据本机是否有公网 IPv6 控制，防止有公网 IPv6 时绕过 TUN）。
-7. **Claude 单独分流**：
-   - 建立独立的 `🦀 Claude` 策略组，与日常浏览网页的通用代理组解耦。
-8. **规则置顶，不混入智能分流**：
-   - 将 `claudeRules` 置于 `config.rules` 最顶部，高于一切 `GEOSITE` 或通用泛规则。
-9. **保持连接复用**：
-   - 保持 TCP Keep-Alive 与 HTTP/2 连接复用，避免每次请求重建握手。
-10. **控制并发请求**：
-    - 单一出口 IP 下并发请求建议控制在 **5 个以内**。
-11. **网络路径要短且干净**：
-    - 物理距离优先级：**亚洲 → 亚洲（如台湾/日本/新加坡家宽，延迟低）** > 亚洲 → 美西 > 避免跨欧洲绕路。
+`no-resolve` 仅控制 IP 规则是否主动触发解析，不是关闭 DNS。当前只在两条 Claude IP 兜底保留，其他已有规则与子规则的该参数会移除，可能改变它们触发解析的时机。
 
----
+## 参考
 
-## 3. 常见故障排查表
+主要方案：[小小东](https://github.com/BeiFfan/xiaoxiaodong-vps)；规则集：[MetaCubeX](https://github.com/MetaCubeX/meta-rules-dat)。
 
-| 现象 | 原因 | 解决方法 |
-| :--- | :--- | :--- |
-| 修改 `Script.js` 保存后，`clash-verge.yaml` 里没有新规则 | 当前订阅在 `profiles.yaml` 中还挂载了订阅级局部 `option.script`，其在全局 `Script.js` 之后执行并过滤掉了新增规则 | 将局部脚本中的个人规则合并至全局 `Script.js`，并将局部脚本改为 `function main(config) { return config; }` |
-| `ip.net.coffee/claude/` 显示 **WebRTC UDP 出口异常**（IP 与 Claude 出口不一致） | 所选机场节点为「链式落地家宽」（TCP 走家宽 IP，UDP 从前置机房 IP 出站） | 在 `Script.js` 中保持 `STUN_MODE = "REJECT"`，保存重载后刷新网页即变为绿色「WebRTC 已禁用或无泄露」 |
-| `ip.net.coffee/claude/` 顶部「中国出口 IPv4」显示成了国外代理 IP | 原订阅规则未将国内测速源 `2026.ip138.com` / `my.ip.cn` 设为直连，落入了末尾 `MATCH` 代理 | `Script.js` 已默认将 `ip138.com` 和 `ip.cn` 加入 `CUSTOM_DIRECT_SUFFIXES` 直连规则 |
-| `ip.net.coffee/claude/` 报 **DNS 可能泄露（CN）** | 1. 订阅末尾 `GEOIP,CN` 未带 `no-resolve`；<br>2. Clash Verge 开启了「DNS 覆写」覆盖了脚本设置 | 1. 确保 `Script.js` 已为 `GEOIP,CN` 追加 `,no-resolve`；<br>2. 在「设置 → Clash 设置 → DNS 覆写」中关闭覆写开关 |
-| `claude.ai` 卡在白屏或报错 `api.statsig.com` 连接失败 | 机场订阅自带的广告拦截规则包含 `DOMAIN,api.statsig.com,🛑 广告过滤` | `Script.js` 已自动过滤剔除原订阅中的 `api.statsig.com`、`sentry.io`、`datadoghq.com` 冲突规则 |
+coffee：[检测入口](https://ip.net.coffee/claude/)、[DNS 检测](https://ip.net.coffee/dns/)、[分流清单](https://ip.net.coffee/claude/site.html)、[核心配置](https://ip.net.coffee/claude/claudecode.html)。
+
+官方：[DNS](https://wiki.metacubex.one/config/dns/)、[路由规则](https://wiki.metacubex.one/config/rules/)、[TUN](https://wiki.metacubex.one/config/inbound/tun/)、[API](https://wiki.metacubex.one/api/)、[Verge 扩展](https://www.clashverge.dev/guide/extend.html)。

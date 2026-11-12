@@ -1,0 +1,21 @@
+{
+  "mode": "rule",
+  "ipv6": true,
+  "proxies": [
+    {"name": "TW 家宽", "type": "socks5", "server": "192.0.2.1", "port": 1080},
+    {"name": "US 固定节点", "type": "socks5", "server": "192.0.2.2", "port": 1080}
+  ],
+  "proxy-groups": [{"name": "日常", "type": "select", "proxies": ["US 固定节点"]}],
+  "dns": {
+    "enable": true, "ipv6": true, "enhanced-mode": "fake-ip", "fake-ip-range6": "fdfe:dcba:9876::/64",
+    "nameserver": ["https://dns.google/dns-query"],
+    "proxy-server-nameserver": ["223.5.5.5"],
+    "nameserver-policy": {"+.campus.example": "192.0.2.53"}
+  },
+  "tun": {
+    "enable": true, "auto-route": true, "strict-route": true,
+    "dns-hijack": ["any:53", "tcp://any:53"],
+    "inet6-address": ["fdfe:dcba:9876::1/126"]
+  },
+  "rules": ["DOMAIN-SUFFIX,campus.example,DIRECT", "GEOIP,CN,DIRECT", "MATCH,日常"]
+}
