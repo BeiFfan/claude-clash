@@ -43,6 +43,20 @@ const CLAUDE_POLICY = {
     "DOMAIN-KEYWORD,claude,AI-人工智能",
     "DOMAIN-KEYWORD,anthropic,AI-人工智能"
   ],
+  "userRules": [
+    "DOMAIN,anthropic.com.cdn.cloudflare.net",
+    "DOMAIN,anthropic.auth0.com",
+    "DOMAIN,anthropic-com.ghost.io",
+    "DOMAIN-SUFFIX,sentry.io",
+    "DOMAIN,browser-intake-us5-datadoghq.com",
+    "DOMAIN-KEYWORD,datadog",
+    "DOMAIN-KEYWORD,sift",
+    "DOMAIN-SUFFIX,intercom.io",
+    "DOMAIN-SUFFIX,intercomcdn.com",
+    "IP-CIDR,160.79.104.0/21,no-resolve",
+    "IP-CIDR6,2607:6bc0::/32,no-resolve",
+    "IP-ASN,399358,no-resolve"
+  ],
   "sourceDns": {
     "cache-algorithm": "arc",
     "default-nameserver": [
@@ -239,9 +253,13 @@ function proxyDependencies(config) {
 }
 
 function managedRules() {
-  return CLAUDE_POLICY.sourceRules.map(rule => rule
+  const source=CLAUDE_POLICY.sourceRules.map(rule => rule
     .replace("RULE-SET,Claude,", "RULE-SET,"+CLAUDE_POLICY.domainRuleSet+",")
     .replace(/,AI-人工智能$/, ","+CLAUDE_POLICY.group));
+  const extra=CLAUDE_POLICY.userRules.map(rule=>{
+    const parts=rule.split(",");parts.splice(2,0,CLAUDE_POLICY.group);return parts.join(",");
+  });
+  return source.concat(extra);
 }
 function dnsPreset() {
   const dns = JSON.parse(JSON.stringify(CLAUDE_POLICY.sourceDns));

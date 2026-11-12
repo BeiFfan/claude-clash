@@ -32,7 +32,7 @@ function inspect(config){
   const oldReject=Array.isArray(rules)&&rules.some(r=>
     /^AND,/.test(r)&&/,REJECT$/.test(r)&&/(?:claude|anthropic|hcaptcha|sentry|statsig|segment|feature|datadog|intercom|stun|160\.79\.104|2607:6bc0)/i.test(r)||
     /^IP-CIDR6,2607:6bc0::\/32,REJECT/.test(r));
-  checks.push(result('source_rules',prefixOK&&!oldReject?'PASS':'FAIL','小小东局域网、公共认证及 Claude 规则原序；无额外 UDP/IPv6/STUN 拒绝'));
+  checks.push(result('source_rules',prefixOK&&!oldReject?'PASS':'FAIL','小小东基础规则及用户明确补充清单；无额外 UDP/IPv6/STUN 拒绝'));
   const provider=config['rule-providers']?.[p.domainRuleSet],expected=domainProviderDefinition();
   checks.push(result('anthropic_rule_set',provider&&Object.entries(expected).every(([k,v])=>same(provider[k],v))&&!config['rule-providers']?.['claude-clash-strong-keywords']?'PASS':'FAIL','使用与小小东相同的 Anthropic 上游；保留手动更新和缓存适配'));
   const dns=config.dns||{},preset=dnsPreset();

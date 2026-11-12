@@ -7,7 +7,8 @@
 - 原文采用局域网直连、Google 公共认证和 Claude 分流段，保持顺序，只适配策略组及规则集名称。
 - DNS 基础字段与对应域名策略使用原值：默认/直连/节点为阿里、腾讯 DoH，指定域名为 Cloudflare/Google DoH，无策略组后缀。
 - 沿用源文件 IPv6=false、fake-IP、ARC、关闭 H3 和四项过滤表。
-- 不增加 Claude UDP/IPv6/STUN 拒绝、IP 兜底、进程接管或额外验证码/遥测域名，不使用 coffee 补充。
+- 在源规则之后、原订阅规则之前，追加用户明确提供的 CDN、认证、遥测/客服域名，以及 IPv4/IPv6/ASN 兜底；全部走 Claude 组。清单集中在模板 userRules，已有规则不重复添加。
+- 三条 IP/ASN 兜底保留 no-resolve：匹配时不主动触发域名解析，并非 IP 反查。不增加 UDP/IPv6/STUN 拒绝、进程接管或清单外域名，DNS 保持原值。
 - 保留台湾家宽手动候选、当前节点、个人直连/专用 DNS；原订阅其余规则和 no-resolve 保持。
 - 规则集使用源 rule-sources.json 指定的同一 MetaCubeX 上游，复用缓存并保留手动更新，避免依赖其私人 VPS 占位地址。
 

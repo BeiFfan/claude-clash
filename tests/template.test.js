@@ -11,11 +11,12 @@ test('standalone Verge script is a pure configuration transformation',()=>{
   assert.equal(vm.runInContext('main(input)',sandbox)['proxy-groups'][0].type,'select');
   assert.deepEqual(input,before);
 });
-test('routing is exactly the upstream snapshot with only group and provider names adapted',()=>{
+test('routing keeps the upstream snapshot then appends the explicit user list',()=>{
   const expected=source.rules.map(r=>r.replace('RULE-SET,Claude,','RULE-SET,claude-clash-anthropic,').replace(/,AI-人工智能$/,',🦀 Claude'));
+  expected.push(...policy.userRules.map(r=>{const p=r.split(',');p.splice(2,0,'🦀 Claude');return p.join(',');}));
   const c=main(base());assert.deepEqual(c.rules.slice(0,expected.length),expected);
   assert.equal(c.rules.some(r=>r.endsWith(',REJECT')),false);
-  assert.equal(c.rules.some(r=>/stun|hcaptcha|160\.79\.104|2607:6bc0/.test(r)),false);
+  assert.equal(c.rules.some(r=>/stun|hcaptcha/.test(r)),false);
   assert.deepEqual(c.rules.slice(expected.length),base().rules);
 });
 test('DNS equals upstream original values without forced routes or extra record filtering',()=>{
