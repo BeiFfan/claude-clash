@@ -11,6 +11,7 @@
 
    ```js
    const PREFERRED_NODE_KEYWORD = "你的节点完整名称";
+   const INCLUDE_TAIWAN_RESIDENTIAL = true; // 追加订阅中标注台湾家宽的本地节点
    const CUSTOM_DIRECT_SUFFIXES = []; // 保留自己的直连域名
    const CUSTOM_DIRECT_KEYWORDS = [];
    const CUSTOM_NAMESERVER_POLICY = {}; // 保留内网、学校等专用 DNS
@@ -20,7 +21,7 @@
 4. 使用 **rule 模式**，启用 TUN、自动路由及 UDP/TCP DNS 劫持（`any:53`、`tcp://any:53`）。检查后续订阅扩展和应用 DNS/IPv6 覆写，确保没有覆盖本模板。
 5. 本地加载并核对最终配置、实际规则和 `🦀 Claude` 当前节点，再由用户手动验收。
 
-脚本不附带订阅或节点。节点名必须完全匹配；未指定时先选 `REJECT`。provider 型订阅可手动选择，默认同样拒绝。复制 Skill 目录到所用 Agent 的技能目录后，按其说明执行即可。
+脚本不附带订阅或节点。首选节点名必须完全匹配；其后追加标注台湾/台灣/Taiwan/TW 且含家宽/家寬/住宅/Residential 的本地节点，供手动选择。保留首选节点，不自动轮换；未指定时先选 `REJECT`。provider 型订阅的动态节点另行核对。节点名称不证明真实地区或住宅属性。复制 Skill 目录到所用 Agent 的技能目录后，按其说明执行即可。
 
 ## 核心策略
 
@@ -29,7 +30,7 @@
 | 固定出口 | `🦀 Claude` 手动组，不自动轮换、不回退 DIRECT |
 | 域名 | MetaCubeX Anthropic 规则集 + 本地补充；手动更新，`interval: 0` |
 | 关键词 | `claude`、`anthropic`、`datadog`、`sentry`、`sift`，宁可多匹配 |
-| 共享服务 | Sentry、Statsig、Segment、Datadog、Intercom 等纳入 Claude 策略 |
+| 共享服务 | hCaptcha、Sentry、Statsig、Segment、Datadog、Intercom 等纳入 Claude 策略 |
 | 默认及 Claude DNS | Cloudflare / Google DoH，通过 `#🦀 Claude` 绑定当前固定组 |
 | 直连与节点 DNS | 阿里 / 腾讯 DoH；保留个人专用 DNS |
 | IPv6 | 关闭内核及 DNS IPv6；管理域名另有 IPv6 拒绝 |

@@ -16,9 +16,9 @@ description: 为 Clash Verge Rev / Mihomo 配置 Claude 固定代理出口、域
 
 ## 配置
 
-1. 按用户选定的**完整节点名**填写 `PREFERRED_NODE_KEYWORD`，合并已有 `CUSTOM_DIRECT_SUFFIXES`、`CUSTOM_DIRECT_KEYWORDS`、`CUSTOM_NAMESERVER_POLICY`。不按住宅/地区等标签猜测节点，不改变已有选择。
+1. 按用户选定的**完整节点名**填写 `PREFERRED_NODE_KEYWORD`，合并已有 `CUSTOM_DIRECT_SUFFIXES`、`CUSTOM_DIRECT_KEYWORDS`、`CUSTOM_NAMESERVER_POLICY`。`INCLUDE_TAIWAN_RESIDENTIAL = true` 按明确要求追加所有标注台湾家宽的本地节点；当前首选仍排第一，不改变已有选择或自动轮换。名称不是实际地区/住宅属性证明；provider 动态成员另行核对。
 2. 从订阅原文生成候选，保留个人逻辑。模板是纯配置变换 `main(config, profileName)`；第三参数仅供离线选项和测试。没有明确选择默认 REJECT，不引入 DIRECT 回退。
-3. 保留模板核心策略：在线 Anthropic 规则集、claude/anthropic 与共享服务关键词兜底、共享服务同出口、默认及管理域名海外 DoH 绑定 Claude 组、国内直连/节点及专用 DNS、内核/DNS IPv6 关闭、管理域名 UDP 与六个公共 STUN 防护。
+3. 保留模板核心策略：在线 Anthropic 规则集、claude/anthropic 与共享服务关键词兜底、共享服务同出口、默认及管理域名海外 DoH 绑定 Claude 组、国内直连/节点及专用 DNS、内核/DNS IPv6 关闭、管理域名 UDP 与六个公共 STUN 防护。hCaptcha 根域名及全部子域名纳入相同分流/DNS/UDP/IPv6 策略，覆盖网页登录验证码。
 4. 保持规则集 `interval: 0`，手动更新。no-resolve 只在两条 Claude IP 兜底保留。不得增加整进程接管、进程内网直连例外或仅针对检测页的规则。
 5. 核对 rule 模式、TUN、自动路由和 UDP/TCP 53 劫持，审核后续覆写；不为取证开放新控制接口或修改无关系统设置。
 

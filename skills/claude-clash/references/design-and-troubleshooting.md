@@ -5,12 +5,14 @@
 | 来源 | 内容 |
 | --- | --- |
 | 核心域名 | MetaCubeX `anthropic.yaml` 在线规则集；首次无缓存需下载，之后手动更新 |
-| 本地后缀 | sentry.io、statsig.com、statsigapi.net、segment.io、featuregates.org、featureassets.org、datadoghq.com、intercom.io、intercomcdn.com |
+| 本地后缀 | hcaptcha.com、sentry.io、statsig.com、statsigapi.net、segment.io、featuregates.org、featureassets.org、datadoghq.com、intercom.io、intercomcdn.com |
 | 精确主机 | anthropic.com.cdn.cloudflare.net、anthropic.auth0.com、anthropic-com.ghost.io、cdn.usefathom.com、challenges.cloudflare.com、browser-intake-us5-datadoghq.com |
 | 关键词 | claude、anthropic、datadog、sentry、sift；域名分流和 DNS 一起覆盖 |
 | IP 兜底 | 160.79.104.0/21 走 Claude；2607:6bc0::/32 拒绝 |
 
-管理域名的 TCP 走 `🦀 Claude`，UDP/IPv6 拒绝。策略组手动选择，无自动轮换或 DIRECT 回退；未指定节点先 REJECT。共享服务按域名整体接管，不区分浏览器标签页。
+管理域名的 TCP 走 `🦀 Claude`，UDP/IPv6 拒绝。hCaptcha 包括根域名及全部子域名，如 newassets.hcaptcha.com、api.hcaptcha.com，DNS 同样绑定 Claude 组。共享服务按域名整体接管，不区分浏览器标签页。
+
+策略组手动选择，无自动轮换或 DIRECT 回退；首选节点之后追加所有名称含台湾/台灣/Taiwan/TW 及家宽/家寬/住宅/Residential 的本地节点，重复成员去重。未指定首选时先 REJECT；关闭 INCLUDE_TAIWAN_RESIDENTIAL 可仅保留明确首选。名称仅是候选标签，provider 动态成员与真实出口需另行核对。
 
 六个已知公共 STUN：stun.l.google.com、stun1 至 stun4.l.google.com、stun.cloudflare.com，默认拒绝 UDP；这不覆盖所有 WebRTC 服务。
 

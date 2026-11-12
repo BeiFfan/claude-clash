@@ -8,7 +8,7 @@ const CLAUDE_POLICY = {
   group: "🦀 Claude",
   // 只列在线规则集之外的补充域名，核心域名由 Anthropic 规则集和关键词覆盖。
   suffixes: ["sentry.io", "statsig.com", "statsigapi.net", "segment.io", "featuregates.org",
-    "featureassets.org", "datadoghq.com", "intercom.io", "intercomcdn.com"],
+    "featureassets.org", "datadoghq.com", "intercom.io", "intercomcdn.com", "hcaptcha.com"],
   exact: ["anthropic.com.cdn.cloudflare.net", "anthropic.auth0.com", "anthropic-com.ghost.io",
     "cdn.usefathom.com", "challenges.cloudflare.com", "browser-intake-us5-datadoghq.com"],
   // 强标识与关联遥测宁可多匹配，不因缩小其他网站影响而遗漏。
@@ -212,13 +212,15 @@ function proxyDependencies(config) {
 function main(input, profileName, overrides) {
   // 用户参数。第三个参数仅供离线工具/测试使用，Verge 调用只需 main(config)。
   const PREFERRED_NODE_KEYWORD = "";
+  // 按用户要求追加所有标注台湾家宽的本地节点；只加入候选，不自动切换。
+  const INCLUDE_TAIWAN_RESIDENTIAL = true;
   // 默认拒绝六个已知公共 STUN 的 UDP；可能影响使用同域名的网页音视频。
   const STUN_MODE = "REJECT";
   // 按需合并用户已有的直连域名。
   const CUSTOM_DIRECT_SUFFIXES = [];
   const CUSTOM_DIRECT_KEYWORDS = [];
   const CUSTOM_NAMESERVER_POLICY = {};
-  const options = Object.assign({preferred: PREFERRED_NODE_KEYWORD, stunMode: STUN_MODE,
+  const options = Object.assign({preferred: PREFERRED_NODE_KEYWORD, includeTaiwanResidential: INCLUDE_TAIWAN_RESIDENTIAL, stunMode: STUN_MODE,
     directSuffixes: CUSTOM_DIRECT_SUFFIXES, directKeywords: CUSTOM_DIRECT_KEYWORDS,
     nameserverPolicy: CUSTOM_NAMESERVER_POLICY}, overrides || {});
   if (!["OFF", "REJECT", "PROXY"].includes(options.stunMode)) throw new Error("STUN_MODE_INVALID");
@@ -239,8 +241,10 @@ function main(input, profileName, overrides) {
   const preferred = options.preferred ? supported.filter(n => n === options.preferred) : [];
   if (options.preferred && !preferred.length && !providers.length) throw new Error("PREFERRED_NODE_NOT_FOUND");
   if (!supported.length && !providers.length) throw new Error("NO_ELIGIBLE_PROXY");
-  // 只采用明确选择，不再按地区/家宽等标签猜测；无明确选择时先拒绝，等待手动选择。
-  const ordered = options.preferred ? preferred : supported;
+  // 保留明确选择；地区/家宽名称只用于用户要求的额外候选，不作为出口质量证明。
+  const extra = options.includeTaiwanResidential ? supported.filter(name =>
+    /(?:台湾|台灣|\b(?:Taiwan|TW)\b)/i.test(name) && /(?:家宽|家寬|住宅|Residential)/i.test(name)) : [];
+  const ordered = [...new Set([...(options.preferred ? preferred : supported), ...extra])];
   const group = {name: CLAUDE_POLICY.group, type: "select", proxies: [...ordered, "REJECT"],
     "empty-fallback": "REJECT", "default-selected": preferred[0] || "REJECT"};
   if (providers.length && !preferred.length) group.use = providers;

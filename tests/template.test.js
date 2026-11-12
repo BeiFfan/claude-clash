@@ -94,10 +94,46 @@ test('provider-only subscription always has a real group with a safe initial cho
   assert.equal(check(output,'claude_group'), 'PASS');
 });
 
-test('only the explicit exact node is selected without residential heuristics', () => {
+test('explicit exact node remains selected when extra Taiwan candidates are included', () => {
   assert.equal(group(main(base(), '', {preferred:'US 固定节点'})).proxies[0], 'US 固定节点');
   assert.throws(() => main(base(), '', {preferred:'missing'}), /PREFERRED_NODE_NOT_FOUND/);
   assert.throws(() => main(base(), '', {preferred:'HK'}), /PREFERRED_NODE/);
+});
+
+test('Taiwan residential candidates are appended without changing selection or allowing direct fallback', () => {
+  const c=base();
+  for (const name of ['台湾家宽 01','台灣家寬 02','Taiwan Residential 03','TW Residential 04',
+    '台湾普通 05','香港家宽 06','NotTaiwanResidentialExample','US 住宅直连']) {
+    c.proxies.push({name,type:name==='US 住宅直连'?'direct':'socks5'});
+  }
+  // The Latin region marker must be a complete word, not part of another name.
+  c.proxies.push({name:'TWO Residential 07',type:'socks5'});
+  const out=main(c,'',{preferred:'US 固定节点'}),g=group(out);
+  assert.deepEqual(g.proxies,['US 固定节点','TW 家宽','台湾家宽 01','台灣家寬 02',
+    'Taiwan Residential 03','TW Residential 04','REJECT']);
+  assert.equal(g['default-selected'],'US 固定节点');
+  assert.equal(g.type,'select'); assert.equal(g['empty-fallback'],'REJECT');
+  assert.deepEqual(main(out,'',{preferred:'US 固定节点'}),out);
+  assert.deepEqual(group(main(c,'',{preferred:'US 固定节点',includeTaiwanResidential:false})).proxies,
+    ['US 固定节点','REJECT']);
+  assert.equal(group(main(c))['default-selected'],'REJECT');
+  assert.equal(check(out,'claude_group'),'PASS');
+});
+
+test('hCaptcha root and subdomains share Claude routing, DNS and UDP/IPv6 protection', () => {
+  const c=base(); c.rules.unshift('DOMAIN-SUFFIX,hcaptcha.com,DIRECT');
+  c.dns['nameserver-policy']['newassets.hcaptcha.com']=['223.5.5.5'];
+  const out=main(c),ns=out.dns['nameserver-policy'];
+  for (const domain of ['hcaptcha.com','newassets.hcaptcha.com','api.hcaptcha.com']) {
+    assert.equal(route(out,{network:'tcp',domain}),'🦀 Claude');
+    assert.equal(route(out,{network:'udp',domain},false),'REJECT');
+    assert.equal(route(out,{network:'tcp',domain,ip:'2001:db8::1'}),'REJECT');
+  }
+  assert.deepEqual(ns['+.hcaptcha.com'],out.dns.nameserver);
+  assert.deepEqual(ns['newassets.hcaptcha.com'],out.dns.nameserver);
+  assert.ok(!out.rules.includes('DOMAIN-SUFFIX,hcaptcha.com,DIRECT'));
+  assert.equal(route(out,{network:'tcp',domain:'hcaptcha.com.example'}),'日常');
+  assert.equal(check(out,'managed_dns'),'PASS');
 });
 
 test('legacy group references and custom rules survive migration, including modifiers and sub-rules', () => {
@@ -467,7 +503,7 @@ test('domain rule set covers a future domain consistently in routing, fake-IP an
   assert.equal(route(output,{domain,ruleSets,network:'udp'},false),'REJECT');
   assert.equal(route(output,{domain,ruleSets,network:'tcp',ip:'2001:db8::2'}),'REJECT');
   assert.equal(check(output,'anthropic_rule_set'),'PASS');
-  assert.equal(policy.suffixes.length+policy.exact.length,15);
+  assert.equal(policy.suffixes.length+policy.exact.length,16);
   assert.ok(!policy.suffixes.includes('anthropic.com')); assert.ok(!policy.exact.includes('servd-anthropic-website.b-cdn.net'));
 });
 
