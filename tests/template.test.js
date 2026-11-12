@@ -19,14 +19,21 @@ test('routing keeps the upstream snapshot then appends the explicit user list',(
   assert.equal(c.rules.some(r=>/stun|hcaptcha/.test(r)),false);
   assert.deepEqual(c.rules.slice(expected.length),base().rules);
 });
-test('DNS equals upstream original values without forced routes or extra record filtering',()=>{
+test('DNS separates domestic, Claude and ordinary proxy paths without changing bootstrap DNS',()=>{
   const input=base();input.mode='global';const c=main(input),expected=structuredClone(source.dns);
   expected['nameserver-policy']['rule-set:claude-clash-anthropic']=expected['nameserver-policy']['rule-set:Claude'];delete expected['nameserver-policy']['rule-set:Claude'];
+  const claude=['https://1.1.1.1/dns-query#🦀 Claude','https://8.8.8.8/dns-query#🦀 Claude'];
+  for(const key of Object.keys(expected['nameserver-policy']))expected['nameserver-policy'][key]=claude;
+  expected.nameserver=['https://1.1.1.1/dns-query#日常','https://8.8.8.8/dns-query#日常'];
+  expected['nameserver-policy']['rule-set:claude-clash-dns']=claude;
+  expected['nameserver-policy']['rule-set:claude-clash-direct-dns']=expected['direct-nameserver'];
+  expected['nameserver-policy']['geosite:cn,private']=expected['direct-nameserver'];
   expected['nameserver-policy']['+.campus.example']='192.0.2.53';
   assert.deepEqual(c.dns,expected);
   assert.equal(c.ipv6,source.ipv6);
   assert.equal(c.mode,'rule');
-  assert.equal(JSON.stringify(c.dns).includes('#🦀 Claude'),false);
+  assert.ok(c['rule-providers']['claude-clash-dns'].payload.includes('DOMAIN-KEYWORD,claude'));
+  assert.ok(c['rule-providers']['claude-clash-dns'].payload.includes('DOMAIN-KEYWORD,sift'));
 });
 test('all Taiwan residential candidates remain manual and preferred node stays first',()=>{
   const b=base();b.proxies.push({name:'台湾家宽 02',type:'socks5'},{name:'台湾普通',type:'socks5'},{name:'HK 家宽',type:'socks5'});
@@ -43,7 +50,7 @@ test('personal rules, special DNS, original no-resolve and subrules are preserve
 test('source rules and DNS override old direct policies without changing other proxy groups',()=>{
   const b=base();b.rules.unshift('DOMAIN-SUFFIX,anthropic.com,DIRECT');b.dns['nameserver-policy']['+.anthropic.com']=['223.5.5.5'];
   const c=main(b);assert.ok(c.rules.indexOf('DOMAIN-SUFFIX,anthropic.com,🦀 Claude')<c.rules.indexOf('DOMAIN-SUFFIX,anthropic.com,DIRECT'));
-  assert.deepEqual(c.dns['nameserver-policy']['+.anthropic.com'],['https://1.1.1.1/dns-query','https://8.8.8.8/dns-query']);
+  assert.deepEqual(c.dns['nameserver-policy']['+.anthropic.com'],['https://1.1.1.1/dns-query#🦀 Claude','https://8.8.8.8/dns-query#🦀 Claude']);
   assert.deepEqual(c['proxy-groups'].slice(1),b['proxy-groups']);
 });
 test('transformation is idempotent',()=>{const c=main(base());assert.deepEqual(main(c),c);assert.equal(aggregate(inspect(c)),'PASS');});
@@ -52,7 +59,7 @@ test('missing nodes and wrong exact preferred name do not silently select anothe
   assert.throws(()=>main(base(),'',{preferred:'not-present'}),/PREFERRED_NODE/);
 });
 test('provider-only group remains usable without inserting a reject policy',()=>{
-  const b=base();b.proxies=[];b['proxy-groups']=[];b.rules=['MATCH,DIRECT'];b['proxy-providers']={local:{type:'file',path:'never-read.yaml'}};
+  const b=base();b.proxies=[];b['proxy-groups']=[{name:'日常',type:'select',use:['local']}];b.rules=['MATCH,日常'];b['proxy-providers']={local:{type:'file',path:'never-read.yaml'}};
   const g=group(main(b));assert.deepEqual(g.proxies,[]);assert.deepEqual(g.use,['local']);assert.ok(!Object.hasOwn(g,'empty-fallback'));
 });
 test('legacy group references migrate while unrelated modifiers are retained',()=>{
@@ -63,12 +70,12 @@ test('dependency cycles and provider source collisions stop generation',()=>{
   const b=base();b.proxies[0]['dialer-proxy']='日常';b['proxy-groups'][0].proxies=['TW 家宽'];assert.throws(()=>main(b),/CYCLE/);
   const other=base();other['rule-providers']={'claude-clash-anthropic':{url:'https://rules.example/private.yaml'}};assert.throws(()=>main(other),/COLLISION/);
 });
-test('validator rejects added reject guards, changed source DNS and overwritten rule order',()=>{
+test('validator rejects added reject guards, missing DNS proxy and overwritten rule order',()=>{
   for(const damage of [
     c=>c.rules.unshift('AND,((NETWORK,udp),(DOMAIN-SUFFIX,hcaptcha.com)),REJECT'),
     c=>c.rules.push('AND,((NETWORK,udp),(DOMAIN-KEYWORD,claude)),REJECT'),
     c=>c.rules.unshift('MATCH,DIRECT'),
-    c=>c.dns.nameserver=['https://1.1.1.1/dns-query#🦀 Claude']
+    c=>c.dns.nameserver=['https://1.1.1.1/dns-query#missing-group']
   ]){const c=main(base());damage(c);assert.equal(aggregate(inspect(c)),'FAIL');}
 });
 test('CLI errors never echo sensitive input',()=>{

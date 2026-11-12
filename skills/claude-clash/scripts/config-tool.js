@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 仅检查传入 JSON；不联网、不写配置。
 const fs=require('node:fs');
-const {policy:p,managedRules,dnsPreset,domainProviderDefinition,splitRule,ruleTargetIndex,proxyDependencies}=require('../templates/Script.js');
+const {policy:p,managedRules,dnsPreset,dnsDomainProviders,domainProviderDefinition,splitRule,ruleTargetIndex,proxyDependencies,resolverProxy}=require('../templates/Script.js');
 const result=(name,status,message)=>({name,status,message});
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 function aggregate(checks){return checks.some(c=>c.status==='FAIL')?'FAIL':checks.some(c=>c.status==='UNKNOWN')?'UNKNOWN':'PASS';}
@@ -35,11 +35,13 @@ function inspect(config){
   checks.push(result('source_rules',prefixOK&&!oldReject?'PASS':'FAIL','小小东基础规则及用户明确补充清单；无额外 UDP/IPv6/STUN 拒绝'));
   const provider=config['rule-providers']?.[p.domainRuleSet],expected=domainProviderDefinition();
   checks.push(result('anthropic_rule_set',provider&&Object.entries(expected).every(([k,v])=>same(provider[k],v))&&!config['rule-providers']?.['claude-clash-strong-keywords']?'PASS':'FAIL','使用与小小东相同的 Anthropic 上游；保留手动更新和缓存适配'));
-  const dns=config.dns||{},preset=dnsPreset();
+  const dns=config.dns||{},dnsProviders=dnsDomainProviders(config),dnsGroup=resolverProxy(dns.nameserver?.[0]||''),
+    preset=dnsPreset(dnsGroup,!!dnsProviders['claude-clash-direct-dns']);
   const common=Object.entries(preset).filter(([k])=>k!=='nameserver-policy');
-  const dnsOK=common.every(([k,v])=>same(dns[k],v))&&Object.entries(preset['nameserver-policy']).every(([k,v])=>same(dns['nameserver-policy']?.[k],v))&&
+  const dnsOK=groups.some(g=>g.name===dnsGroup)&&common.every(([k,v])=>same(dns[k],v))&&Object.entries(preset['nameserver-policy']).every(([k,v])=>same(dns['nameserver-policy']?.[k],v))&&
+    Object.entries(dnsProviders).every(([k,v])=>same(config['rule-providers']?.[k],v))&&
     !dns['nameserver-policy']?.['rule-set:claude-clash-strong-keywords']&&dns.fallback===undefined&&dns['fallback-filter']===undefined&&dns['fake-ip-range6']===undefined;
-  checks.push(result('source_dns',dnsOK?'PASS':'FAIL','DNS 参数与小小东原值一致；默认国内 DoH、源内指定域名海外 DoH，无自加后缀'));
+  checks.push(result('dns_paths',dnsOK?'PASS':'FAIL','国内直连/专用 DNS、Claude 组海外 DoH、日常代理组海外 DoH；节点解析独立'));
   checks.push(result('ipv6_settings',config.ipv6===false&&dns.ipv6===false?'PASS':'FAIL','沿用源配置的内核/DNS IPv6=false'));
   checks.push(result('rule_mode',config.mode==='rule'?'PASS':config.mode?'FAIL':'UNKNOWN','运行模式应为 rule'));
   const tun=config.tun||{},h=tun['dns-hijack']||[];

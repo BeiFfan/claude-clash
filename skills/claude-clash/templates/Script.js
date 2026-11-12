@@ -261,10 +261,36 @@ function managedRules() {
   });
   return source.concat(extra);
 }
-function dnsPreset() {
+function dnsProxyGroup(config, explicit) {
+  const match=(config.rules||[]).map(splitRule).find(p=>p[0]==="MATCH");
+  const name=explicit||(match&&match[1]);
+  if (!(config["proxy-groups"]||[]).some(g=>g.name===name)) throw new Error("DNS_PROXY_GROUP_REQUIRED");
+  return name;
+}
+function dnsDomainProviders(config) {
+  const direct=new Set(["DIRECT"]);
+  for (let changed=true;changed;) {
+    changed=false;
+    for (const g of config["proxy-groups"]||[]) if (!direct.has(g.name)&&!g.use?.length&&!g["include-all"]&&!g["include-all-providers"]&&!g["include-all-proxies"]&&
+      g.proxies?.length&&g.proxies.every(n=>direct.has(n))) {direct.add(g.name);changed=true;}
+  }
+  const payload=target=>[...new Set((config.rules||[]).map(splitRule).filter(parts=>
+    ["DOMAIN","DOMAIN-SUFFIX","DOMAIN-KEYWORD"].includes(parts[0])&&target.has(parts[2])).map(parts=>parts.slice(0,2).join(",")))];
+  const definitions={"claude-clash-dns":{type:"inline",behavior:"classical",payload:payload(new Set([CLAUDE_POLICY.group]))}};
+  const domestic=payload(direct);
+  if (domestic.length) definitions["claude-clash-direct-dns"]={type:"inline",behavior:"classical",payload:domestic};
+  return definitions;
+}
+function dnsPreset(proxyGroup, hasDirectDomains=true) {
   const dns = JSON.parse(JSON.stringify(CLAUDE_POLICY.sourceDns));
-  dns["nameserver-policy"]["rule-set:"+CLAUDE_POLICY.domainRuleSet] = dns["nameserver-policy"]["rule-set:Claude"];
+  const overseas=group=>["https://1.1.1.1/dns-query#"+group,"https://8.8.8.8/dns-query#"+group];
+  dns.nameserver=overseas(proxyGroup);
+  for (const key of Object.keys(dns["nameserver-policy"])) dns["nameserver-policy"][key]=overseas(CLAUDE_POLICY.group);
+  dns["nameserver-policy"]["rule-set:"+CLAUDE_POLICY.domainRuleSet] = overseas(CLAUDE_POLICY.group);
   delete dns["nameserver-policy"]["rule-set:Claude"];
+  dns["nameserver-policy"]["rule-set:claude-clash-dns"]=overseas(CLAUDE_POLICY.group);
+  if (hasDirectDomains) dns["nameserver-policy"]["rule-set:claude-clash-direct-dns"]=dns["direct-nameserver"].slice();
+  dns["nameserver-policy"]["geosite:cn,private"]=dns["direct-nameserver"].slice();
   return dns;
 }
 function domainProviderDefinition() {
@@ -280,11 +306,13 @@ function migrateRule(rule, legacy) {
 function main(input, profileName, overrides) {
   const PREFERRED_NODE_KEYWORD = "";
   const INCLUDE_TAIWAN_RESIDENTIAL = true;
+  // 填写日常代理组；留空时沿用原订阅 MATCH 组，不改变该组的节点选择。
+  const DEFAULT_DNS_PROXY_GROUP = "";
   const CUSTOM_DIRECT_SUFFIXES = [];
   const CUSTOM_DIRECT_KEYWORDS = [];
   const CUSTOM_NAMESERVER_POLICY = {};
   const options=Object.assign({preferred:PREFERRED_NODE_KEYWORD,includeTaiwanResidential:INCLUDE_TAIWAN_RESIDENTIAL,
-    directSuffixes:CUSTOM_DIRECT_SUFFIXES,directKeywords:CUSTOM_DIRECT_KEYWORDS,nameserverPolicy:CUSTOM_NAMESERVER_POLICY},overrides||{});
+    dnsProxyGroup:DEFAULT_DNS_PROXY_GROUP,directSuffixes:CUSTOM_DIRECT_SUFFIXES,directKeywords:CUSTOM_DIRECT_KEYWORDS,nameserverPolicy:CUSTOM_NAMESERVER_POLICY},overrides||{});
   if (!input || typeof input!=="object" || Array.isArray(input)) throw new Error("CONFIG_INVALID");
   const config=JSON.parse(JSON.stringify(input));
   const proxies=config.proxies||[], groups=config["proxy-groups"]||[];
@@ -318,7 +346,9 @@ function main(input, profileName, overrides) {
   if (config.rules!==undefined&&!Array.isArray(config.rules)) throw new Error("RULES_INVALID");
   config.rules=[...new Set([...managedRules(),...personal,...(config.rules||[]).map(r=>migrateRule(r,legacy))])];
   if (config["sub-rules"]) for (const k of Object.keys(config["sub-rules"])) config["sub-rules"][k]=config["sub-rules"][k].map(r=>migrateRule(r,legacy));
-  const oldDns=config.dns||{}, dns=dnsPreset();
+  const dnsProviders=dnsDomainProviders(config);
+  Object.assign(config["rule-providers"],dnsProviders);
+  const oldDns=config.dns||{}, dns=dnsPreset(dnsProxyGroup(config,options.dnsProxyGroup),!!dnsProviders["claude-clash-direct-dns"]);
   for (const k of ["listen","use-hosts","use-system-hosts"]) if (oldDns[k]!==undefined) dns[k]=oldDns[k];
   dns["nameserver-policy"]=Object.assign({},oldDns["nameserver-policy"]||{},options.nameserverPolicy||{},dns["nameserver-policy"]);
   config.dns=dns;config.ipv6=false;config.mode="rule";
@@ -329,6 +359,6 @@ function main(input, profileName, overrides) {
   return config;
 }
 if (typeof module!=="undefined"&&module.exports) module.exports={
-  main,policy:CLAUDE_POLICY,managedRules,dnsPreset,domainProviderDefinition,
+  main,policy:CLAUDE_POLICY,managedRules,dnsPreset,dnsDomainProviders,domainProviderDefinition,
   splitRule,ruleTargetIndex,proxyDependencies,mapResolvers,resolverProxy
 };
