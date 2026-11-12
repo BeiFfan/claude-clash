@@ -1,0 +1,140 @@
+{
+  "source": "https://github.com/BeiFfan/xiaoxiaodong-vps/blob/main/skills/xiaoxiaodong-vps/scripts/server/files/clash-template.yaml",
+  "source_blob_sha": "6ce02e8423432990bc94a8eef00aa6097b6d8172",
+  "rules": [
+    "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+    "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+    "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+    "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+    "IP-CIDR,169.254.0.0/16,DIRECT,no-resolve",
+    "IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",
+    "IP-CIDR6,::1/128,DIRECT,no-resolve",
+    "IP-CIDR6,fc00::/7,DIRECT,no-resolve",
+    "IP-CIDR6,fe80::/10,DIRECT,no-resolve",
+    "DOMAIN-SUFFIX,accounts.google.com,AI-人工智能",
+    "DOMAIN,apis.google.com,AI-人工智能",
+    "DOMAIN,ogs.google.com,AI-人工智能",
+    "DOMAIN-SUFFIX,gstatic.com,AI-人工智能",
+    "DOMAIN-SUFFIX,googleusercontent.com,AI-人工智能",
+    "DOMAIN,oauth2.googleapis.com,AI-人工智能",
+    "DOMAIN,securetoken.googleapis.com,AI-人工智能",
+    "DOMAIN,identitytoolkit.googleapis.com,AI-人工智能",
+    "RULE-SET,Claude,AI-人工智能",
+    "DOMAIN-SUFFIX,anthropic.com,AI-人工智能",
+    "DOMAIN-SUFFIX,claude.ai,AI-人工智能",
+    "DOMAIN-SUFFIX,claude.com,AI-人工智能",
+    "DOMAIN-SUFFIX,clau.de,AI-人工智能",
+    "DOMAIN-SUFFIX,claudeusercontent.com,AI-人工智能",
+    "DOMAIN-SUFFIX,claudemcpclient.com,AI-人工智能",
+    "DOMAIN-SUFFIX,claudemcpcontent.com,AI-人工智能",
+    "DOMAIN,servd-anthropic-website.b-cdn.net,AI-人工智能",
+    "DOMAIN,cdn.usefathom.com,AI-人工智能",
+    "DOMAIN,challenges.cloudflare.com,AI-人工智能",
+    "DOMAIN-SUFFIX,statsig.com,AI-人工智能",
+    "DOMAIN-SUFFIX,statsigapi.net,AI-人工智能",
+    "DOMAIN-SUFFIX,segment.io,AI-人工智能",
+    "DOMAIN-SUFFIX,featuregates.org,AI-人工智能",
+    "DOMAIN-SUFFIX,featureassets.org,AI-人工智能",
+    "DOMAIN-KEYWORD,claude,AI-人工智能",
+    "DOMAIN-KEYWORD,anthropic,AI-人工智能"
+  ],
+  "dns": {
+    "cache-algorithm": "arc",
+    "default-nameserver": [
+      "223.5.5.5",
+      "119.29.29.29"
+    ],
+    "direct-nameserver": [
+      "https://dns.alidns.com/dns-query",
+      "https://doh.pub/dns-query"
+    ],
+    "direct-nameserver-follow-policy": true,
+    "enable": true,
+    "enhanced-mode": "fake-ip",
+    "fake-ip-filter": [
+      "*.lan",
+      "+.local",
+      "+.msftconnecttest.com",
+      "+.msftncsi.com"
+    ],
+    "fake-ip-range": "198.18.0.1/16",
+    "ipv6": false,
+    "nameserver": [
+      "https://dns.alidns.com/dns-query",
+      "https://doh.pub/dns-query"
+    ],
+    "nameserver-policy": {
+      "+.accounts.google.com": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "+.anthropic.com": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "+.clau.de": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "+.claude.ai": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "+.claude.com": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "+.claudeusercontent.com": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "+.googleusercontent.com": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "+.gstatic.com": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "accounts.google.com": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "apis.google.com": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "challenges.cloudflare.com": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "identitytoolkit.googleapis.com": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "oauth2.googleapis.com": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "ogs.google.com": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "rule-set:Claude": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ],
+      "securetoken.googleapis.com": [
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/dns-query"
+      ]
+    },
+    "prefer-h3": false,
+    "proxy-server-nameserver": [
+      "https://dns.alidns.com/dns-query",
+      "https://doh.pub/dns-query"
+    ],
+    "respect-rules": true
+  },
+  "ipv6": false
+}
